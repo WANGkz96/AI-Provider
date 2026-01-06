@@ -1,0 +1,48 @@
+import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+// Go up two levels from src/config to project root
+const PROJECT_ROOT = path.resolve(path.dirname(__filename), '../../');
+const CONFIG_PATH = path.join(PROJECT_ROOT, 'models.json');
+
+/**
+ * Reads configured models from models.json
+ */
+export const getConfiguredModels = () => {
+  try {
+    if (!fs.existsSync(CONFIG_PATH)) {
+      console.warn('models.json not found, returning empty list');
+      return [];
+    }
+    const data = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    return JSON.parse(data);
+  } catch (error) {
+    console.error('Error reading models.json:', error);
+    return [];
+  }
+};
+
+/**
+ * Updates models.json
+ */
+export const saveConfiguredModels = (models) => {
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(models, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Error saving models.json:', error);
+    return false;
+  }
+};
+
+export const config = {
+  port: process.env.PORT || 3000,
+  googleApiKey: process.env.GOOGLE_API_KEY,
+  groqApiKey: process.env.GROQ_API_KEY,
+  dockerHost: process.env.DOCKER_HOST_URL || 'http://localhost'
+};

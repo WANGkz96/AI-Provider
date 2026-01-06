@@ -1,0 +1,56 @@
+[
+  {
+    "id": "gemma-3-27b-it",
+    "provider": "google",
+    "apiModelId": "gemma-3-27b-it",
+    "adapterMode": "native"
+  },
+  {
+    "id": "gemini-2.5-flash",
+    "provider": "google",
+    "apiModelId": "gemini-2.5-flash",
+    "adapterMode": "openai"
+  },
+  {
+    "id": "gemini-2.5-flash-lite",
+    "provider": "google",
+    "apiModelId": "gemini-2.5-flash-lite",
+    "adapterMode": "openai"
+  },
+  {
+    "id": "gemini-3-flash-preview",
+    "provider": "google",
+    "apiModelId": "gemini-3-flash-preview",
+    "adapterMode": "openai"
+  },
+  {
+    "id": "llama-3.3-70b-versatile",
+    "provider": "groq",
+    "apiModelId": "llama-3.3-70b-versatile"
+  },
+  {
+    "id": "gpt-oss-120b",
+    "provider": "groq",
+    "apiModelId": "openai/gpt-oss-120b"
+  },
+  {
+    "id": "llama-4-maverick",
+    "provider": "groq",
+    "apiModelId": "meta-llama/llama-4-maverick-17b-128e-instruct"
+  },
+  {
+    "id": "kimi-k2",
+    "provider": "groq",
+    "apiModelId": "moonshotai/kimi-k2-instruct"
+  },
+  {
+    "id": "qwen3-32b",
+    "provider": "groq",
+    "apiModelId": "qwen/qwen3-32b"
+  },
+  {
+    "id": "compound",
+    "provider": "groq",
+    "apiModelId": "groq/compound"
+  }
+]
