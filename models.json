@@ -3,54 +3,77 @@
     "id": "gemma-3-27b-it",
     "provider": "google",
     "apiModelId": "gemma-3-27b-it",
-    "adapterMode": "native"
+    "adapterMode": "native",
+    "type": "text"
   },
   {
     "id": "gemini-2.5-flash",
     "provider": "google",
     "apiModelId": "gemini-2.5-flash",
-    "adapterMode": "openai"
+    "adapterMode": "openai",
+    "type": "text"
   },
   {
     "id": "gemini-2.5-flash-lite",
     "provider": "google",
     "apiModelId": "gemini-2.5-flash-lite",
-    "adapterMode": "openai"
+    "adapterMode": "openai",
+    "type": "text"
   },
   {
     "id": "gemini-3-flash-preview",
     "provider": "google",
     "apiModelId": "gemini-3-flash-preview",
-    "adapterMode": "openai"
+    "adapterMode": "openai",
+    "type": "text"
+  },
+  {
+    "id": "gemini-3-pro-preview",
+    "provider": "google",
+    "apiModelId": "gemini-3-pro-preview",
+    "adapterMode": "openai",
+    "type": "text"
   },
   {
     "id": "llama-3.3-70b-versatile",
     "provider": "groq",
-    "apiModelId": "llama-3.3-70b-versatile"
+    "apiModelId": "llama-3.3-70b-versatile",
+    "type": "text"
   },
   {
     "id": "gpt-oss-120b",
     "provider": "groq",
-    "apiModelId": "openai/gpt-oss-120b"
+    "apiModelId": "openai/gpt-oss-120b",
+    "type": "text"
   },
   {
     "id": "llama-4-maverick",
     "provider": "groq",
-    "apiModelId": "meta-llama/llama-4-maverick-17b-128e-instruct"
+    "apiModelId": "meta-llama/llama-4-maverick-17b-128e-instruct",
+    "type": "text"
   },
   {
     "id": "kimi-k2",
     "provider": "groq",
-    "apiModelId": "moonshotai/kimi-k2-instruct"
+    "apiModelId": "moonshotai/kimi-k2-instruct",
+    "type": "text"
   },
   {
     "id": "qwen3-32b",
     "provider": "groq",
-    "apiModelId": "qwen/qwen3-32b"
+    "apiModelId": "qwen/qwen3-32b",
+    "type": "text"
   },
   {
     "id": "compound",
     "provider": "groq",
-    "apiModelId": "groq/compound"
+    "apiModelId": "groq/compound",
+    "type": "text"
+  },
+  {
+    "id": "chatterbox-local",
+    "provider": "chatterbox",
+    "baseUrl": "http://localhost:8000",
+    "type": "audio"
   }
 ]
