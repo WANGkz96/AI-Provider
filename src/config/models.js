@@ -42,7 +42,7 @@ export const saveConfiguredModels = (models) => {
 
 export const config = {
   port: process.env.PORT || 3000,
-  googleApiKey: process.env.GOOGLE_API_KEY,
+  googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
   groqApiKey: process.env.GROQ_API_KEY,
   dockerHost: process.env.DOCKER_HOST_URL || 'http://localhost'
 };

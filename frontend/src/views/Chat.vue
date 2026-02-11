@@ -84,6 +84,101 @@
             </div>
         </template>
 
+        <!-- IMAGE MODE SETTINGS -->
+        <template v-else-if="currentModelType === 'image'">
+             <div class="space-y-6">
+                <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Image Mode</label>
+                   <div class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs text-slate-200">
+                      {{ imageModeLabel }}
+                   </div>
+                </div>
+
+                <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Image Size</label>
+                   <select v-model="imageParams.size" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option value="1K">1K</option>
+                      <option value="2K">2K</option>
+                   </select>
+                </div>
+
+                <div v-if="currentImageMode === 'imagen' || currentImageMode === 'nano-banana'">
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Aspect Ratio</label>
+                   <select v-model="imageParams.aspectRatio" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option value="1:1">1:1</option>
+                      <option value="4:3">4:3</option>
+                      <option value="3:4">3:4</option>
+                      <option value="16:9">16:9</option>
+                      <option value="9:16">9:16</option>
+                   </select>
+                </div>
+
+                <div v-if="currentImageMode === 'imagen'">
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Output Format</label>
+                   <select v-model="imageParams.format" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option value="image/png">PNG</option>
+                      <option value="image/jpeg">JPEG</option>
+                   </select>
+                </div>
+
+                <div v-if="currentImageMode === 'imagen'">
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Images Count</label>
+                   <select v-model.number="imageParams.count" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option v-for="n in 4" :key="n" :value="n">{{ n }}</option>
+                   </select>
+                </div>
+             </div>
+        </template>
+
+        <!-- VIDEO MODE SETTINGS -->
+        <template v-else-if="currentModelType === 'video'">
+             <div class="space-y-6">
+                <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Video Mode</label>
+                   <div class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs text-slate-200">
+                      {{ videoModeLabel }}
+                   </div>
+                </div>
+
+                <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Aspect Ratio</label>
+                   <select v-model="videoParams.aspectRatio" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option value="16:9">16:9</option>
+                      <option value="9:16">9:16</option>
+                      <option value="1:1">1:1</option>
+                      <option value="4:3">4:3</option>
+                      <option value="3:4">3:4</option>
+                   </select>
+                </div>
+
+                <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Resolution</label>
+                   <select v-model="videoParams.resolution" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option value="720p">720p</option>
+                      <option value="1080p">1080p</option>
+                   </select>
+                </div>
+
+                <div>
+                    <label class="text-xs font-medium text-slate-400 block mb-1.5">Duration (seconds)</label>
+                    <input 
+                      type="number"
+                      min="1"
+                      step="1"
+                      v-model.number="videoParams.durationSeconds"
+                      class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none"
+                    >
+                </div>
+
+                <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Videos Count</label>
+                   <select v-model.number="videoParams.count" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                      <option v-for="n in 2" :key="n" :value="n">{{ n }}</option>
+                   </select>
+                </div>
+             </div>
+        </template>
+
         <!-- AUDIO MODE SETTINGS -->
         <template v-else-if="currentModelType === 'audio'">
              <div class="space-y-6">
@@ -224,6 +319,159 @@
              </div>
          </template>
 
+         <!-- IMAGE MODE -->
+         <template v-else-if="currentModelType === 'image'">
+             <div class="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                <div class="max-w-4xl mx-auto space-y-8">
+                    
+                    <!-- Input Section -->
+                    <div class="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 shadow-xl">
+                        <h2 class="text-xl font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h3l2-2h4l2 2h3a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            Image Generation
+                        </h2>
+                        
+                        <textarea 
+                            v-model="imageInput"
+                            placeholder="Describe the image you want to generate..."
+                            class="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder:text-slate-600 focus:ring-2 focus:ring-emerald-500/50 outline-none resize-none text-lg mb-4"
+                        ></textarea>
+                        
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs text-slate-500">
+                                <span class="text-slate-300 font-medium">{{ imageModeLabel }}</span>
+                                <span class="mx-2">/</span>
+                                <span>{{ imageParams.size }}</span>
+                                <span class="mx-2">/</span>
+                                <span>{{ imageParams.aspectRatio }}</span>
+                                <template v-if="currentImageMode === 'imagen'">
+                                    <span class="mx-2">/</span>
+                                    <span>{{ imageParams.format }}</span>
+                                </template>
+                            </div>
+                            <button 
+                                @click="generateImage"
+                                :disabled="!imageInput.trim() || isGenerating"
+                                class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-medium shadow-lg shadow-emerald-900/20 transition-all flex items-center gap-2"
+                            >
+                                <span v-if="isGenerating">Generating...</span>
+                                <span v-else>Generate Image</span>
+                                <svg v-if="isGenerating" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- History / Results -->
+                    <div v-if="imageResults.length > 0" class="space-y-4">
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider">Recent Generations</h3>
+                        
+                        <div v-for="(result, idx) in imageResults" :key="idx" class="bg-slate-800 border border-slate-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-4">
+                            <div class="flex items-start justify-between gap-4 mb-4">
+                                <div class="min-w-0">
+                                    <p class="text-sm text-slate-200 truncate" :title="result.prompt">"{{ result.prompt }}"</p>
+                                    <div class="text-xs text-slate-500 flex gap-2">
+                                        <span>{{ result.model }}</span>
+                                        <span>/</span>
+                                        <span>{{ result.summary }}</span>
+                                    </div>
+                                </div>
+                                <span class="text-xs text-slate-500 shrink-0">{{ result.createdAt }}</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div v-for="(img, imgIdx) in result.images" :key="img.fileName + imgIdx" class="bg-slate-900/40 border border-slate-700 rounded-xl p-3">
+                                    <img :src="img.dataUrl" class="w-full rounded-lg border border-slate-700/70 object-contain max-h-[360px] bg-slate-950/40" />
+                                    <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
+                                        <span>{{ img.mimeType }}</span>
+                                        <a :href="img.dataUrl" :download="img.fileName" class="text-emerald-400 hover:text-emerald-300">Download</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+             </div>
+         </template>
+
+         <!-- VIDEO MODE -->
+         <template v-else-if="currentModelType === 'video'">
+             <div class="flex-1 overflow-y-auto p-8 custom-scrollbar">
+                <div class="max-w-4xl mx-auto space-y-8">
+                    
+                    <!-- Input Section -->
+                    <div class="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 shadow-xl">
+                        <h2 class="text-xl font-semibold text-slate-100 mb-4 flex items-center gap-2">
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 13m-6 4h8a2 2 0 002-2V9a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zM5 17a2 2 0 01-2-2V9a2 2 0 012-2h1v10H5z" />
+                            </svg>
+                            Video Generation
+                        </h2>
+                        
+                        <textarea 
+                            v-model="videoInput"
+                            placeholder="Describe the video you want to generate..."
+                            class="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder:text-slate-600 focus:ring-2 focus:ring-orange-500/50 outline-none resize-none text-lg mb-4"
+                        ></textarea>
+                        
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs text-slate-500">
+                                <span class="text-slate-300 font-medium">{{ videoModeLabel }}</span>
+                                <span class="mx-2">/</span>
+                                <span>{{ videoParams.resolution }}</span>
+                                <span class="mx-2">/</span>
+                                <span>{{ videoParams.aspectRatio }}</span>
+                                <span class="mx-2">/</span>
+                                <span>{{ videoParams.durationSeconds }}s</span>
+                            </div>
+                            <button 
+                                @click="generateVideo"
+                                :disabled="!videoInput.trim() || isGenerating"
+                                class="bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-medium shadow-lg shadow-orange-900/20 transition-all flex items-center gap-2"
+                            >
+                                <span v-if="isGenerating">Generating...</span>
+                                <span v-else>Generate Video</span>
+                                <svg v-if="isGenerating" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- History / Results -->
+                    <div v-if="videoResults.length > 0" class="space-y-4">
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider">Recent Generations</h3>
+                        
+                        <div v-for="(result, idx) in videoResults" :key="idx" class="bg-slate-800 border border-slate-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-4">
+                            <div class="flex items-start justify-between gap-4 mb-4">
+                                <div class="min-w-0">
+                                    <p class="text-sm text-slate-200 truncate" :title="result.prompt">"{{ result.prompt }}"</p>
+                                    <div class="text-xs text-slate-500 flex gap-2">
+                                        <span>{{ result.model }}</span>
+                                        <span>/</span>
+                                        <span>{{ result.summary }}</span>
+                                    </div>
+                                </div>
+                                <span class="text-xs text-slate-500 shrink-0">{{ result.createdAt }}</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div v-for="(vid, vidIdx) in result.videos" :key="vid.fileName + vidIdx" class="bg-slate-900/40 border border-slate-700 rounded-xl p-3">
+                                    <video controls :src="vid.dataUrl" class="w-full rounded-lg border border-slate-700/70 bg-slate-950/40 max-h-[360px]"></video>
+                                    <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
+                                        <span>{{ vid.mimeType }}</span>
+                                        <a :href="vid.dataUrl" :download="vid.fileName" class="text-orange-400 hover:text-orange-300">Download</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+             </div>
+         </template>
+
          <!-- AUDIO / TTS MODE -->
          <template v-else-if="currentModelType === 'audio'">
              <div class="flex-1 overflow-y-auto p-8 custom-scrollbar">
@@ -295,8 +543,12 @@ import Header from '../components/Header.vue';
 
 const input = ref('');
 const ttsInput = ref('');
+const imageInput = ref('');
+const videoInput = ref('');
 const messages = ref([]);
 const audioResults = ref([]);
+const imageResults = ref([]);
+const videoResults = ref([]);
 const models = ref([]);
 // const voices = ref([]); // Removed ref
 const selectedModel = ref('');
@@ -324,15 +576,50 @@ const audioParams = reactive({
     cfg: 0.5
 });
 
+const imageParams = reactive({
+    size: '1K',
+    aspectRatio: '1:1',
+    count: 1,
+    format: 'image/png'
+});
+
+const videoParams = reactive({
+    aspectRatio: '16:9',
+    durationSeconds: 8,
+    resolution: '1080p',
+    count: 1
+});
+
+const currentModel = computed(() => models.value.find(x => x.id === selectedModel.value));
+
 const currentModelType = computed(() => {
-    const m = models.value.find(x => x.id === selectedModel.value);
-    return m ? (m.type || 'text') : 'text';
+    return currentModel.value ? (currentModel.value.type || 'text') : 'text';
 });
 
 // Voices are now derived from the selected model's additions
 const voices = computed(() => {
-    const m = models.value.find(x => x.id === selectedModel.value);
-    return m?.additions?.voices || [];
+    return currentModel.value?.additions?.voices || [];
+});
+
+const currentImageMode = computed(() => {
+    if (currentModelType.value !== 'image') return undefined;
+    return currentModel.value?.additions?.imageMode || currentModel.value?.imageMode || 'imagen';
+});
+
+const imageModeLabel = computed(() => {
+    if (currentImageMode.value === 'imagen') return 'Imagen';
+    if (currentImageMode.value === 'nano-banana') return 'Nano Banana';
+    return currentImageMode.value || 'Image';
+});
+
+const currentVideoMode = computed(() => {
+    if (currentModelType.value !== 'video') return undefined;
+    return currentModel.value?.additions?.videoMode || currentModel.value?.videoMode || 'veo';
+});
+
+const videoModeLabel = computed(() => {
+    if (currentVideoMode.value === 'veo') return 'Veo';
+    return currentVideoMode.value || 'Video';
 });
 
 const scrollToBottom = async () => {
@@ -437,6 +724,137 @@ const sendMessage = async () => {
   } finally {
     isGenerating.value = false;
   }
+};
+
+const mimeToExtension = (mimeType) => {
+    if (mimeType === 'image/png') return 'png';
+    if (mimeType === 'image/jpeg') return 'jpg';
+    return 'bin';
+};
+
+const buildImageSummary = () => {
+    if (currentImageMode.value === 'imagen') {
+        return `${imageParams.size} / ${imageParams.aspectRatio} / ${imageParams.format} / ${imageParams.count}x`;
+    }
+    return `${imageParams.size} / ${imageParams.aspectRatio}`;
+};
+
+const buildVideoSummary = () => {
+    return `${videoParams.resolution} / ${videoParams.aspectRatio} / ${videoParams.durationSeconds}s / ${videoParams.count}x`;
+};
+
+const generateImage = async () => {
+    if (!imageInput.value.trim() || isGenerating.value) return;
+
+    isGenerating.value = true;
+
+    try {
+        const imagePayload = {
+            size: imageParams.size
+        };
+
+        if (currentImageMode.value === 'imagen') {
+            imagePayload.count = imageParams.count;
+            imagePayload.aspectRatio = imageParams.aspectRatio;
+            imagePayload.format = imageParams.format;
+        } else {
+            imagePayload.aspectRatio = imageParams.aspectRatio;
+        }
+
+        const payload = {
+            model: selectedModel.value,
+            prompt: imageInput.value,
+            image: imagePayload,
+            stream: false
+        };
+
+        const res = await axios.post('/run', payload);
+
+        if (res.data.type === 'image') {
+            const now = new Date();
+            const images = (res.data.images || []).map((img, idx) => {
+                const mimeType = img.mimeType || imageParams.format || 'image/png';
+                return {
+                    mimeType,
+                    dataUrl: `data:${mimeType};base64,${img.data}`,
+                    fileName: `image_${now.getTime()}_${idx + 1}.${mimeToExtension(mimeType)}`
+                };
+            });
+
+            if (images.length === 0) {
+                throw new Error('No images returned from API');
+            }
+
+            imageResults.value.unshift({
+                prompt: imageInput.value,
+                model: selectedModel.value,
+                createdAt: now.toLocaleTimeString(),
+                summary: buildImageSummary(),
+                images
+            });
+        } else {
+            throw new Error('Unexpected response type from image model');
+        }
+    } catch (e) {
+        console.error('Image generation failed', e);
+        alert('Image generation failed: ' + (e.response?.data?.error || e.message));
+    } finally {
+        isGenerating.value = false;
+    }
+};
+
+const generateVideo = async () => {
+    if (!videoInput.value.trim() || isGenerating.value) return;
+
+    isGenerating.value = true;
+
+    try {
+        const payload = {
+            model: selectedModel.value,
+            prompt: videoInput.value,
+            video: {
+                aspectRatio: videoParams.aspectRatio,
+                durationSeconds: videoParams.durationSeconds,
+                resolution: videoParams.resolution,
+                count: videoParams.count
+            },
+            stream: false
+        };
+
+        const res = await axios.post('/run', payload);
+
+        if (res.data.type === 'video') {
+            const now = new Date();
+            const videos = (res.data.videos || []).map((vid, idx) => {
+                const mimeType = vid.mimeType || 'video/mp4';
+                const ext = mimeType.split('/')[1] || 'mp4';
+                return {
+                    mimeType,
+                    dataUrl: `data:${mimeType};base64,${vid.data}`,
+                    fileName: `video_${now.getTime()}_${idx + 1}.${ext}`
+                };
+            });
+
+            if (videos.length === 0) {
+                throw new Error('No videos returned from API');
+            }
+
+            videoResults.value.unshift({
+                prompt: videoInput.value,
+                model: selectedModel.value,
+                createdAt: now.toLocaleTimeString(),
+                summary: buildVideoSummary(),
+                videos
+            });
+        } else {
+            throw new Error('Unexpected response type from video model');
+        }
+    } catch (e) {
+        console.error('Video generation failed', e);
+        alert('Video generation failed: ' + (e.response?.data?.error || e.message));
+    } finally {
+        isGenerating.value = false;
+    }
 };
 
 const generateAudio = async () => {

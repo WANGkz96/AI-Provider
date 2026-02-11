@@ -47,6 +47,22 @@ const runSchema = z.object({
     exaggeration: z.number().min(0).max(2).optional(),
     cfg: z.number().min(0).max(2).optional(),
     voiceSample: z.string().optional()
+  }).optional(),
+
+  // Image generation params
+  image: z.object({
+    size: z.string().optional(),
+    aspectRatio: z.string().optional(),
+    count: z.number().int().min(1).max(4).optional(),
+    format: z.enum(['image/png', 'image/jpeg']).optional()
+  }).optional(),
+
+  // Video generation params
+  video: z.object({
+    aspectRatio: z.string().optional(),
+    durationSeconds: z.number().int().positive().optional(),
+    resolution: z.string().optional(),
+    count: z.number().int().min(1).max(4).optional()
   }).optional()
 });
 
@@ -108,7 +124,7 @@ router.get('/available-models', async (req, res) => {
             available = true; 
         }
 
-        // Additions (e.g. Voices)
+        // Additions (e.g. Voices / Image modes)
         if (m.type === 'audio' && m.provider === 'chatterbox' && available) {
             console.log(`[API] Checking additions for ${m.id}. Provider has getVoices: ${!!provider.getVoices}`);
             if (provider.getVoices) {
@@ -117,6 +133,14 @@ router.get('/available-models', async (req, res) => {
                 console.log(`[API] Got voices: ${voices ? voices.length : 'null'}`);
                 additions.voices = voices;
             }
+        }
+
+        if (m.type === 'image' && m.imageMode) {
+            additions.imageMode = m.imageMode;
+        }
+
+        if (m.type === 'video' && m.videoMode) {
+            additions.videoMode = m.videoMode;
         }
     } else {
         console.warn(`Provider '${m.provider}' not found for model '${m.id}'`);
@@ -175,11 +199,16 @@ router.post('/run', async (req, res) => {
         model: targetModel.id,
         apiModelId: targetModel.apiModelId,
         adapterMode: targetModel.adapterMode,
+        type: targetModel.type || 'text',
         baseUrl: targetModel.baseUrl, // Important for local models
+        imageMode: targetModel.imageMode,
+        videoMode: targetModel.videoMode,
         
         // Input text can come from prompt or messages
         prompt: body.prompt, 
         messages: body.messages,
+        image: body.image,
+        video: body.video,
         
         stream: body.stream,
         options: {
@@ -196,7 +225,7 @@ router.post('/run', async (req, res) => {
         }
     };
 
-    if (body.stream && targetModel.type !== 'audio') { // Audio usually doesn't stream via SSE text
+    if (body.stream && targetModel.type === 'text') { // Only text models stream via SSE
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
@@ -231,6 +260,26 @@ router.post('/run', async (req, res) => {
               });
           } else {
               res.status(500).json({ error: 'Invalid audio response from adapter' });
+          }
+      } else if (targetModel.type === 'image') {
+          if (response.type === 'image' && Array.isArray(response.images) && response.images.length > 0) {
+              res.json({
+                  type: 'image',
+                  images: response.images,
+                  metadata: response.metadata || {}
+              });
+          } else {
+              res.status(500).json({ error: 'Invalid image response from adapter' });
+          }
+      } else if (targetModel.type === 'video') {
+          if (response.type === 'video' && Array.isArray(response.videos) && response.videos.length > 0) {
+              res.json({
+                  type: 'video',
+                  videos: response.videos,
+                  metadata: response.metadata || {}
+              });
+          } else {
+              res.status(500).json({ error: 'Invalid video response from adapter' });
           }
       } else {
           // Text response

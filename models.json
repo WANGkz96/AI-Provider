@@ -35,6 +35,55 @@
     "type": "text"
   },
   {
+    "id": "models/imagen-4.0-generate-001",
+    "provider": "google",
+    "apiModelId": "models/imagen-4.0-generate-001",
+    "type": "image",
+    "imageMode": "imagen"
+  },
+  {
+    "id": "models/imagen-4.0-ultra-generate-001",
+    "provider": "google",
+    "apiModelId": "models/imagen-4.0-ultra-generate-001",
+    "type": "image",
+    "imageMode": "imagen"
+  },
+  {
+    "id": "models/imagen-4.0-fast-generate-001",
+    "provider": "google",
+    "apiModelId": "models/imagen-4.0-fast-generate-001",
+    "type": "image",
+    "imageMode": "imagen"
+  },
+  {
+    "id": "gemini-3-pro-image-preview",
+    "provider": "google",
+    "apiModelId": "gemini-3-pro-image-preview",
+    "type": "image",
+    "imageMode": "nano-banana"
+  },
+  {
+    "id": "gemini-2.5-flash-image",
+    "provider": "google",
+    "apiModelId": "gemini-2.5-flash-image",
+    "type": "image",
+    "imageMode": "nano-banana"
+  },
+  {
+    "id": "veo-3.1-fast-generate-preview",
+    "provider": "google",
+    "apiModelId": "veo-3.1-fast-generate-preview",
+    "type": "video",
+    "videoMode": "veo"
+  },
+  {
+    "id": "veo-3.1-generate-preview",
+    "provider": "google",
+    "apiModelId": "veo-3.1-generate-preview",
+    "type": "video",
+    "videoMode": "veo"
+  },
+  {
     "id": "llama-3.3-70b-versatile",
     "provider": "groq",
     "apiModelId": "llama-3.3-70b-versatile",
