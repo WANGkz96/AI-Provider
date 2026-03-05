@@ -24,15 +24,26 @@ export class GroqAdapter extends BaseAdapter {
     }
   }
 
-  async generate({ model, apiModelId, messages, stream, options }) {
+  async generate({ model, apiModelId, prompt, messages, media, stream, options }) {
+    if (Array.isArray(media) && media.length > 0) {
+      throw new Error('Media attachments are currently supported only for Gemini text models');
+    }
+
     // Use apiModelId from config if provided, else fall back to the internal ID
     const realModelId = apiModelId || model;
+    const inputMessages = (Array.isArray(messages) && messages.length > 0)
+      ? messages
+      : (prompt ? [{ role: 'user', content: prompt }] : null);
+
+    if (!inputMessages) {
+      throw new Error('No prompt/messages provided for text generation');
+    }
     
     console.log(`[GroqAdapter] Requesting model: ${realModelId}`);
 
     const params = {
       model: realModelId,
-      messages: messages,
+      messages: inputMessages,
       stream: stream,
       temperature: options?.temperature,
       top_p: options?.topP,
@@ -54,7 +65,18 @@ export class GroqAdapter extends BaseAdapter {
       return transformStream();
     } else {
       const completion = await this.groq.chat.completions.create(params);
-      return completion.choices[0]?.message?.content || '';
+      const choice = completion?.choices?.[0];
+      return {
+        content: choice?.message?.content || '',
+        finishReason: choice?.finish_reason ?? null,
+        usage: completion?.usage ? {
+          inputTokens: completion.usage.prompt_tokens ?? null,
+          outputTokens: completion.usage.completion_tokens ?? null,
+          totalTokens: completion.usage.total_tokens ?? null,
+          raw: completion.usage
+        } : null,
+        blockedReason: choice?.finish_reason === 'content_filter' ? 'content_filter' : null
+      };
     }
   }
 }

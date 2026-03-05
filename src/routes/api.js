@@ -31,6 +31,17 @@ const runSchema = z.object({
     content: z.string()
   })).optional(),
   prompt: z.string().optional(), // Direct prompt support
+  media: z.array(z.object({
+    type: z.enum(['image', 'video', 'audio']).optional(),
+    mimeType: z.string().min(1),
+    data: z.string().min(1), // base64 payload (with or without data:*;base64, prefix)
+    name: z.string().optional(),
+    videoMetadata: z.object({
+      startOffset: z.string().optional(),
+      endOffset: z.string().optional(),
+      fps: z.number().positive().optional()
+    }).optional()
+  })).max(10).optional(),
   
   stream: z.boolean().optional().default(false),
   temperature: z.number().min(0).max(2).optional(),
@@ -40,6 +51,9 @@ const runSchema = z.object({
     budget: z.number().min(1024),
     includeThoughts: z.boolean().default(false)
   }).optional(),
+  responseMimeType: z.enum(['text/plain', 'application/json']).optional(),
+  responseSchema: z.record(z.string(), z.any()).optional(),
+  strictJson: z.boolean().optional(),
   
   // Audio / TTS specific params
   tts: z.object({
@@ -65,6 +79,74 @@ const runSchema = z.object({
     count: z.number().int().min(1).max(4).optional()
   }).optional()
 });
+
+function normalizeTextResponse(response) {
+  if (typeof response === 'string') {
+    return {
+      content: response,
+      finishReason: null,
+      usage: null,
+      blockedReason: null,
+      providerMetadata: null
+    };
+  }
+
+  if (response && typeof response === 'object') {
+    return {
+      content: normalizeContentText(response.content),
+      finishReason: response.finishReason ?? null,
+      usage: response.usage ?? null,
+      blockedReason: response.blockedReason ?? null,
+      providerMetadata: response.metadata ?? null
+    };
+  }
+
+  return {
+    content: '',
+    finishReason: null,
+    usage: null,
+    blockedReason: null,
+    providerMetadata: null
+  };
+}
+
+function normalizeContentText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (typeof part?.text === 'string') return part.text;
+        return '';
+      })
+      .join('');
+  }
+  if (content === null || content === undefined) return '';
+  return String(content);
+}
+
+function stripJsonCodeFence(content) {
+  const trimmed = content.trim();
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenceMatch) {
+    return fenceMatch[1].trim();
+  }
+  return trimmed;
+}
+
+function tryParseJson(value) {
+  try {
+    return { ok: true, parsed: JSON.parse(value) };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
+function isTruncatedFinishReason(finishReason) {
+  if (!finishReason) return false;
+  const normalized = String(finishReason).toLowerCase();
+  return normalized === 'length' || normalized === 'max_tokens' || normalized === 'max_output_tokens';
+}
 
 // --- Routes ---
 
@@ -207,6 +289,7 @@ router.post('/run', async (req, res) => {
         // Input text can come from prompt or messages
         prompt: body.prompt, 
         messages: body.messages,
+        media: body.media,
         image: body.image,
         video: body.video,
         
@@ -216,6 +299,9 @@ router.post('/run', async (req, res) => {
             topP: body.topP,
             maxTokens: body.maxTokens,
             thinking: body.thinking,
+            responseMimeType: body.responseMimeType,
+            responseSchema: body.responseSchema,
+            strictJson: body.strictJson,
             
             // Audio Params
             languageId: body.tts?.languageId,
@@ -233,7 +319,11 @@ router.post('/run', async (req, res) => {
       try {
         const stream = await provider.generate({ ...generateParams, stream: true });
         for await (const chunk of stream) {
-            const chunkText = chunk.text();
+            const chunkText = typeof chunk?.text === 'function'
+              ? chunk.text()
+              : (typeof chunk === 'string'
+                ? chunk
+                : (chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8') : ''));
             res.write(`data: ${JSON.stringify({ content: chunkText })}\n\n`);
         }
         res.write('data: [DONE]\n\n');
@@ -283,7 +373,55 @@ router.post('/run', async (req, res) => {
           }
       } else {
           // Text response
-          res.json({ content: response });
+          const normalized = normalizeTextResponse(response);
+          const expectsJson = body.responseMimeType === 'application/json';
+          const strictJson = expectsJson ? (body.strictJson ?? true) : (body.strictJson ?? false);
+          const finishReason = normalized.finishReason;
+          const truncated = isTruncatedFinishReason(finishReason);
+          let content = normalized.content;
+
+          if (expectsJson) {
+            content = stripJsonCodeFence(content);
+            const parsedResult = tryParseJson(content);
+
+            if (!parsedResult.ok && strictJson) {
+              return res.status(422).json({
+                error: 'Model returned invalid JSON',
+                details: parsedResult.error,
+                content,
+                finishReason,
+                usage: normalized.usage,
+                blockedReason: normalized.blockedReason,
+                truncated,
+                metadata: {
+                  requestedMaxTokens: body.maxTokens ?? null,
+                  responseMimeType: body.responseMimeType,
+                  responseSchemaProvided: !!body.responseSchema,
+                  strictJson
+                }
+              });
+            }
+
+            if (parsedResult.ok) {
+              content = JSON.stringify(parsedResult.parsed);
+            }
+          }
+
+          res.json({
+            type: 'text',
+            content,
+            finishReason,
+            usage: normalized.usage,
+            blockedReason: normalized.blockedReason,
+            truncated,
+            metadata: {
+              requestedMaxTokens: body.maxTokens ?? null,
+              responseMimeType: body.responseMimeType || 'text/plain',
+              responseSchemaProvided: !!body.responseSchema,
+              strictJson,
+              provider: normalized.providerMetadata
+            }
+          });
       }
     }
 

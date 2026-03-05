@@ -51,6 +51,7 @@
 
 - **POST** `/run`
 - **Content-Type**: `application/json`
+- **Request size limit**: по умолчанию `100mb` (настраивается через `REQUEST_BODY_LIMIT`)
 
 #### Parameters
 
@@ -59,6 +60,7 @@
 | `model` | string | **Yes** | ID модели (из списка `/available-models`) |
 | `messages` | array | No | История чата (для text моделей). |
 | `prompt` | string | No | Прямой текст запроса (подходит для audio/image). |
+| `media` | array | No | **(New)** Вложения для text-запроса (картинки/видео/аудио). Сейчас обработка поддержана для Gemini text моделей. |
 | `stream` | boolean | No | Включить стриминг ответов (SSE). Default: `false`. |
 | `temperature` | number | No | Креативность (0.0 - 2.0). *Игнорируется для Thinking моделей*. |
 | `topP` | number | No | Nucleus sampling (0.0 - 1.0). |
@@ -74,6 +76,30 @@
   "content": "Текст сообщения"
 }
 ```
+
+#### Media Object (New)
+Единый формат вложений для `/run`. Передаётся как массив `media`.
+
+```json
+[
+  {
+    "type": "image",               // optional: image | video | audio (если не передан, определяется по mimeType)
+    "mimeType": "image/jpeg",      // обязателен
+    "data": "<base64>",            // обязателен (можно с/без data:*;base64, префикса)
+    "name": "frame.jpg",           // optional
+    "videoMetadata": {             // optional, только для video
+      "startOffset": "40s",
+      "endOffset": "80s",
+      "fps": 5
+    }
+  }
+]
+```
+
+Поддерживаемые типы сейчас:
+- `image/*` -> отправляется в Gemini как `inlineData`
+- `video/*` -> загружается через Gemini Files API, затем ждётся состояние `ACTIVE`
+- `audio/*` -> загружается через Gemini Files API, затем ждётся состояние `ACTIVE`
 
 #### Thinking Object (New)
 Используется только для моделей с поддержкой Reasoning (например, `gemini-3-flash-preview`).
@@ -125,6 +151,47 @@
 }
 ```
 
+#### Example Request (Text + Media, Gemini)
+```json
+{
+  "model": "gemini-3-flash-preview",
+  "messages": [
+    { "role": "user", "content": "Опиши видео и укажи таймкоды ключевых моментов." }
+  ],
+  "media": [
+    {
+      "type": "video",
+      "mimeType": "video/mp4",
+      "name": "sample.mp4",
+      "data": "<base64>",
+      "videoMetadata": {
+        "fps": 5
+      }
+    }
+  ],
+  "stream": false
+}
+```
+
+#### Example Request (Audio Attachment, Gemini)
+```json
+{
+  "model": "gemini-3-flash-preview",
+  "messages": [
+    { "role": "user", "content": "Опиши этот аудиофрагмент и выдели ключевые моменты." }
+  ],
+  "media": [
+    {
+      "type": "audio",
+      "mimeType": "audio/mp3",
+      "name": "sample.mp3",
+      "data": "<base64>"
+    }
+  ],
+  "stream": false
+}
+```
+
 #### Example Request (Image)
 ```json
 {
@@ -168,6 +235,31 @@ data: [DONE]
 data: {"error": "Описание ошибки"}
 ```
 
+#### Text Response (JSON)
+```json
+{
+  "type": "text",
+  "content": "Ответ модели",
+  "finishReason": "STOP",
+  "usage": {
+    "inputTokens": 123,
+    "outputTokens": 45,
+    "totalTokens": 168
+  },
+  "blockedReason": null,
+  "truncated": false,
+  "metadata": {
+    "requestedMaxTokens": null,
+    "responseMimeType": "text/plain",
+    "responseSchemaProvided": false,
+    "strictJson": false,
+    "provider": {
+      "multimodal": true
+    }
+  }
+}
+```
+
 #### Image Response (JSON)
 ```json
 {
@@ -200,4 +292,9 @@ data: {"error": "Описание ошибки"}
   }
 }
 ```
+
+## Frontend Notes
+- В text-чате `Enter` отправляет сообщение.
+- `Shift + Enter` добавляет перенос строки без отправки.
+- Добавлена кнопка вложений (image/video/audio, множественный выбор до 10 файлов на запрос).
 

@@ -1,6 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleGenAI, PersonGeneration } from '@google/genai';
 import OpenAI from 'openai';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { BaseAdapter } from './base.js';
 
 export class GoogleAdapter extends BaseAdapter {
@@ -35,7 +39,7 @@ export class GoogleAdapter extends BaseAdapter {
   }
 
   async generate(params) {
-    const { model, apiModelId, options, adapterMode, type } = params;
+    const { model, apiModelId, options, adapterMode, type, media } = params;
 
     // Use apiModelId from config if available, fallback to 'model' ID
     const targetModel = apiModelId || model;
@@ -48,6 +52,10 @@ export class GoogleAdapter extends BaseAdapter {
       return this.generateVideo({ ...params, model: targetModel });
     }
 
+    if (type === 'text' && Array.isArray(media) && media.length > 0) {
+      return this.generateMultimodalViaGemini({ ...params, model: targetModel });
+    }
+
     // Use mode from config ('native' vs 'openai'). Default to native if not specified.
     // But if 'thinking' is used, we force OpenAI as per previous requirement.
     const useOpenAI = adapterMode === 'openai' || options?.thinking;
@@ -55,31 +63,339 @@ export class GoogleAdapter extends BaseAdapter {
     if (useOpenAI) {
         return this.generateViaOpenAI({ ...params, model: targetModel });
     } else {
-        return this.generateViaNativeSDK({ ...params, model: targetModel });
+      return this.generateViaNativeSDK({ ...params, model: targetModel });
     }
   }
 
+  async generateMultimodalViaGemini({ model, prompt, messages, media, stream, options }) {
+    if (!this.imageAI) {
+      throw new Error('Gemini multimodal input requires a valid API key');
+    }
+
+    console.log(`[GoogleAdapter:GeminiMultimodal] Requesting model: ${model}`);
+
+    const { contents } = await this.buildGeminiMultimodalContents({ prompt, messages, media });
+    const config = {
+      topP: options?.topP,
+      maxOutputTokens: options?.maxTokens,
+      responseMimeType: options?.responseMimeType,
+      responseSchema: options?.responseSchema
+    };
+
+    // Thinking config does not combine reliably with file parts across models.
+    if (!options?.thinking) {
+      config.temperature = options?.temperature;
+    }
+
+    const request = {
+      model,
+      contents,
+      config: this.removeUndefined(config)
+    };
+
+    if (stream) {
+      const responseStream = await this.imageAI.models.generateContentStream(request);
+      return this.transformGeminiContentStream(responseStream);
+    }
+
+    const response = await this.imageAI.models.generateContent(request);
+    return this.formatGeminiContentResponse(response);
+  }
+
+  async buildGeminiMultimodalContents({ prompt, messages, media }) {
+    const normalizedMessages = this.normalizeMessages({ prompt, messages });
+    const historyMessages = normalizedMessages.slice(0, -1);
+    const lastMessage = normalizedMessages[normalizedMessages.length - 1];
+
+    const contents = historyMessages.map((message) => this.mapTextMessageToGeminiContent(message));
+
+    const userText = this.normalizeText(lastMessage?.content);
+    const userParts = await this.buildGeminiMediaParts(media);
+
+    if (userText) {
+      userParts.push({ text: userText });
+    }
+
+    if (!userParts.length) {
+      throw new Error('No prompt/messages provided for multimodal generation');
+    }
+
+    contents.push({
+      role: 'user',
+      parts: userParts
+    });
+
+    return { contents };
+  }
+
+  mapTextMessageToGeminiContent(message) {
+    const role = message?.role === 'assistant' ? 'model' : 'user';
+    const text = this.normalizeText(message?.content);
+    const finalText = message?.role === 'system' ? `[SYSTEM]\n${text}` : text;
+
+    return {
+      role,
+      parts: [
+        {
+          text: finalText
+        }
+      ]
+    };
+  }
+
+  async buildGeminiMediaParts(media) {
+    const parts = [];
+
+    for (const item of media || []) {
+      const mediaType = this.resolveMediaType(item);
+      const mimeType = item?.mimeType;
+      const base64Data = this.stripDataUrlPrefix(item?.data);
+
+      if (!mimeType || !base64Data) {
+        throw new Error('Each media item must include mimeType and base64 data');
+      }
+
+      if (mediaType === 'image') {
+        parts.push({
+          inlineData: {
+            mimeType,
+            data: base64Data
+          }
+        });
+        continue;
+      }
+
+      if (mediaType === 'video') {
+        const file = await this.uploadFileAndWaitActive({
+          mimeType,
+          data: base64Data,
+          mediaType
+        });
+
+        const videoPart = {
+          fileData: {
+            fileUri: file.uri,
+            mimeType: file.mimeType || mimeType
+          }
+        };
+
+        const safeVideoMetadata = this.normalizeVideoMetadata(item?.videoMetadata);
+        if (safeVideoMetadata) {
+          videoPart.videoMetadata = safeVideoMetadata;
+        }
+
+        parts.push(videoPart);
+        continue;
+      }
+
+      if (mediaType === 'audio') {
+        const file = await this.uploadFileAndWaitActive({
+          mimeType,
+          data: base64Data,
+          mediaType
+        });
+
+        parts.push({
+          fileData: {
+            fileUri: file.uri,
+            mimeType: file.mimeType || mimeType
+          }
+        });
+        continue;
+      }
+
+      throw new Error(`Unsupported media type '${mediaType}'. Supported: image, video, audio`);
+    }
+
+    return parts;
+  }
+
+  async uploadFileAndWaitActive({ mimeType, data, mediaType }) {
+    const extension = this.mimeTypeToExtension(mimeType);
+    const tempPath = path.join(os.tmpdir(), `gemini-upload-${randomUUID()}.${extension}`);
+    const pollIntervalMs = 5000;
+    const maxPolls = 72;
+
+    await fs.writeFile(tempPath, Buffer.from(data, 'base64'));
+
+    try {
+      let file = await this.imageAI.files.upload({
+        file: tempPath,
+        config: { mimeType }
+      });
+
+      let polls = 0;
+      while (this.getFileState(file?.state) !== 'ACTIVE') {
+        const state = this.getFileState(file?.state);
+
+        if (state === 'FAILED') {
+          throw new Error(`${mediaType || 'Media'} processing failed for uploaded file '${file?.name || 'unknown'}'`);
+        }
+
+        if (polls >= maxPolls) {
+          throw new Error(`${mediaType || 'Media'} processing timed out while waiting for ACTIVE state`);
+        }
+
+        polls += 1;
+        await this.sleep(pollIntervalMs);
+        file = await this.imageAI.files.get({ name: file.name });
+      }
+
+      return file;
+    } finally {
+      await fs.unlink(tempPath).catch(() => {});
+    }
+  }
+
+  transformGeminiContentStream(streamResponse) {
+    const extractChunkText = this.extractGeminiText.bind(this);
+
+    const transformStream = async function* () {
+      for await (const chunk of streamResponse) {
+        const content = extractChunkText(chunk);
+        if (content) {
+          yield { text: () => content };
+        }
+      }
+    };
+
+    return transformStream();
+  }
+
+  formatGeminiContentResponse(response) {
+    return {
+      content: this.extractGeminiText(response),
+      finishReason: response?.candidates?.[0]?.finishReason ?? null,
+      usage: this.mapNativeUsage(response?.usageMetadata),
+      blockedReason: response?.promptFeedback?.blockReason ?? null,
+      metadata: {
+        multimodal: true
+      }
+    };
+  }
+
+  extractGeminiText(responseLike) {
+    if (!responseLike) return '';
+
+    if (typeof responseLike.text === 'function') {
+      return responseLike.text() || '';
+    }
+
+    if (typeof responseLike.text === 'string') {
+      return responseLike.text;
+    }
+
+    const parts = responseLike?.candidates?.[0]?.content?.parts || [];
+    return parts
+      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+      .join('');
+  }
+
+  normalizeVideoMetadata(videoMetadata) {
+    if (!videoMetadata || typeof videoMetadata !== 'object') {
+      return null;
+    }
+
+    const metadata = {
+      startOffset: videoMetadata.startOffset,
+      endOffset: videoMetadata.endOffset,
+      fps: videoMetadata.fps
+    };
+
+    const cleaned = this.removeUndefined(metadata);
+    return Object.keys(cleaned).length > 0 ? cleaned : null;
+  }
+
+  normalizeText(value) {
+    if (typeof value === 'string') return value;
+    if (value === null || value === undefined) return '';
+    return String(value);
+  }
+
+  stripDataUrlPrefix(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    const commaIdx = trimmed.indexOf(',');
+    if (trimmed.startsWith('data:') && commaIdx !== -1) {
+      return trimmed.slice(commaIdx + 1);
+    }
+    return trimmed;
+  }
+
+  resolveMediaType(item) {
+    const explicitType = typeof item?.type === 'string' ? item.type.toLowerCase() : '';
+    if (explicitType === 'image' || explicitType === 'video' || explicitType === 'audio') {
+      return explicitType;
+    }
+
+    const mimeType = typeof item?.mimeType === 'string' ? item.mimeType.toLowerCase() : '';
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('video/')) return 'video';
+    if (mimeType.startsWith('audio/')) return 'audio';
+
+    throw new Error(`Unable to infer media type for mimeType '${item?.mimeType || 'unknown'}'`);
+  }
+
+  mimeTypeToExtension(mimeType) {
+    const safeMime = typeof mimeType === 'string' ? mimeType.toLowerCase() : '';
+    if (safeMime === 'video/mp4') return 'mp4';
+    if (safeMime === 'video/quicktime') return 'mov';
+    if (safeMime === 'video/webm') return 'webm';
+    if (safeMime === 'video/x-msvideo') return 'avi';
+    if (safeMime === 'audio/mpeg' || safeMime === 'audio/mp3') return 'mp3';
+    if (safeMime === 'audio/wav' || safeMime === 'audio/x-wav') return 'wav';
+    if (safeMime === 'audio/aac') return 'aac';
+    if (safeMime === 'audio/flac') return 'flac';
+    if (safeMime === 'audio/ogg') return 'ogg';
+    if (safeMime === 'audio/webm') return 'webm';
+    if (safeMime === 'audio/mp4' || safeMime === 'audio/x-m4a') return 'm4a';
+    return 'bin';
+  }
+
+  getFileState(state) {
+    if (!state) return '';
+    const asString = typeof state?.toString === 'function' ? state.toString() : String(state);
+    const normalized = asString
+      .replace(/^FILE_STATE_/, '')
+      .replace(/^FileState\./, '')
+      .trim()
+      .toUpperCase();
+    return normalized;
+  }
+
+  removeUndefined(obj) {
+    return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined));
+  }
+
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   // --- Implementation 1: Native Google SDK ---
-  async generateViaNativeSDK({ model, messages, stream, options }) {
+  async generateViaNativeSDK({ model, prompt, messages, stream, options }) {
     console.log(`[GoogleAdapter:Native] Requesting model: ${model}`);
+
+    const inputMessages = this.normalizeMessages({ prompt, messages });
 
     const modelParams = {
       model: model,
       generationConfig: {
         topP: options?.topP,
         maxOutputTokens: options?.maxTokens,
-        temperature: options?.temperature
+        temperature: options?.temperature,
+        responseMimeType: options?.responseMimeType,
+        responseSchema: options?.responseSchema
       }
     };
 
     const genModel = this.genAI.getGenerativeModel(modelParams);
 
-    const history = messages.slice(0, -1).map(m => ({
+    const history = inputMessages.slice(0, -1).map(m => ({
       role: m.role === 'user' ? 'user' : 'model',
       parts: [{ text: m.content }]
     }));
 
-    const lastMessage = messages[messages.length - 1].content;
+    const lastMessage = inputMessages[inputMessages.length - 1].content;
 
     const chat = genModel.startChat({ history });
 
@@ -88,36 +404,46 @@ export class GoogleAdapter extends BaseAdapter {
       return result.stream; 
     } else {
       const result = await chat.sendMessage(lastMessage);
-      return result.response.text();
+      return this.formatNativeResponse(result.response);
     }
   }
 
   // --- Implementation 2: OpenAI-Compatible Endpoint ---
-  async generateViaOpenAI({ model, messages, stream, options }) {
+  async generateViaOpenAI({ model, prompt, messages, stream, options }) {
     console.log(`[GoogleAdapter:OpenAI] Requesting model: ${model}`);
+
+    const inputMessages = this.normalizeMessages({ prompt, messages });
 
     const requestOptions = {
       model: model,
-      messages: messages,
+      messages: inputMessages,
       stream: stream,
       top_p: options?.topP,
       max_tokens: options?.maxTokens,
     };
 
+    const googleExtraBody = {};
+
     // Handle Thinking Logic
     if (options?.thinking) {
         console.log('[GoogleAdapter:OpenAI] Thinking enabled:', options.thinking);
         delete requestOptions.temperature;
-        requestOptions.extra_body = {
-            google: {
-                thinking_config: {
-                    include_thoughts: options.thinking.includeThoughts,
-                    thinking_budget: options.thinking.budget
-                }
-            }
+        googleExtraBody.thinking_config = {
+            include_thoughts: options.thinking.includeThoughts,
+            thinking_budget: options.thinking.budget
         };
     } else {
         requestOptions.temperature = options?.temperature;
+    }
+
+    if (options?.responseMimeType === 'application/json') {
+      // Gemini OpenAI-compatible endpoint is stable with json_object mode.
+      // json_schema / response_schema can return 400 for some preview models.
+      requestOptions.response_format = { type: 'json_object' };
+    }
+
+    if (Object.keys(googleExtraBody).length > 0) {
+      requestOptions.extra_body = { google: googleExtraBody };
     }
 
     if (stream) {
@@ -135,8 +461,79 @@ export class GoogleAdapter extends BaseAdapter {
 
     } else {
         const response = await this.openai.chat.completions.create(requestOptions);
-        return response.choices[0].message.content;
+        const choice = response?.choices?.[0];
+        return {
+          content: this.extractOpenAIContent(choice?.message),
+          finishReason: choice?.finish_reason ?? null,
+          usage: this.mapOpenAIUsage(response?.usage),
+          blockedReason: choice?.finish_reason === 'content_filter' ? 'content_filter' : null
+        };
     }
+  }
+
+  normalizeMessages({ prompt, messages }) {
+    if (Array.isArray(messages) && messages.length > 0) {
+      return messages;
+    }
+    if (prompt) {
+      return [{ role: 'user', content: prompt }];
+    }
+    throw new Error('No prompt/messages provided for text generation');
+  }
+
+  extractOpenAIContent(message) {
+    if (!message) return '';
+
+    if (typeof message.content === 'string') {
+      return message.content;
+    }
+
+    if (Array.isArray(message.content)) {
+      return message.content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (typeof part?.text === 'string') return part.text;
+          return '';
+        })
+        .join('');
+    }
+
+    if (typeof message.refusal === 'string') {
+      return message.refusal;
+    }
+
+    return '';
+  }
+
+  mapOpenAIUsage(usage) {
+    if (!usage) return null;
+
+    return {
+      inputTokens: usage.prompt_tokens ?? null,
+      outputTokens: usage.completion_tokens ?? null,
+      totalTokens: usage.total_tokens ?? null,
+      raw: usage
+    };
+  }
+
+  formatNativeResponse(response) {
+    return {
+      content: response?.text?.() ?? '',
+      finishReason: response?.candidates?.[0]?.finishReason ?? null,
+      usage: this.mapNativeUsage(response?.usageMetadata),
+      blockedReason: response?.promptFeedback?.blockReason ?? null
+    };
+  }
+
+  mapNativeUsage(usageMetadata) {
+    if (!usageMetadata) return null;
+
+    return {
+      inputTokens: usageMetadata.promptTokenCount ?? null,
+      outputTokens: usageMetadata.candidatesTokenCount ?? null,
+      totalTokens: usageMetadata.totalTokenCount ?? null,
+      raw: usageMetadata
+    };
   }
 
   async generateImage({ model, prompt, messages, image, imageMode }) {

@@ -18,13 +18,24 @@ export class LocalAdapter extends BaseAdapter {
     }
   }
 
-  async generate({ model, messages, stream, options }) {
+  async generate({ model, prompt, messages, media, stream, options }) {
+    if (Array.isArray(media) && media.length > 0) {
+      throw new Error('Media attachments are currently supported only for Gemini text models');
+    }
+
     // This is a generic implementation assuming an OpenAI-compatible local server (like vLLM or Ollama)
     // You can customize this payload structure if your local container uses a different API.
+    const inputMessages = (Array.isArray(messages) && messages.length > 0)
+      ? messages
+      : (prompt ? [{ role: 'user', content: prompt }] : null);
+
+    if (!inputMessages) {
+      throw new Error('No prompt/messages provided for text generation');
+    }
     
     const payload = {
       model: model, // Some local servers ignore this, others need it
-      messages: messages,
+      messages: inputMessages,
       stream: stream,
       temperature: options?.temperature,
       top_p: options?.topP,
@@ -50,7 +61,18 @@ export class LocalAdapter extends BaseAdapter {
         return response.body; 
       } else {
         const data = await response.json();
-        return data.choices[0].message.content;
+        const choice = data?.choices?.[0];
+        return {
+          content: choice?.message?.content || '',
+          finishReason: choice?.finish_reason ?? null,
+          usage: data?.usage ? {
+            inputTokens: data.usage.prompt_tokens ?? null,
+            outputTokens: data.usage.completion_tokens ?? null,
+            totalTokens: data.usage.total_tokens ?? null,
+            raw: data.usage
+          } : null,
+          blockedReason: choice?.finish_reason === 'content_filter' ? 'content_filter' : null
+        };
       }
     } catch (error) {
       console.error('Local Adapter Generation Error:', error);

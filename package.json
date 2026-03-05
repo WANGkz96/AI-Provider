@@ -6,7 +6,12 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "dev:docker": "node --watch --watch-path=src src/index.js",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:restart": "docker compose restart",
+    "docker:logs": "docker compose logs -f --tail=100"
   },
   "keywords": [],
   "author": "",

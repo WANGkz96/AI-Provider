@@ -12,10 +12,11 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '100mb';
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: requestBodyLimit }));
 
 // API Routes
 app.use('/', apiRoutes);

@@ -35,6 +35,13 @@
     "type": "text"
   },
   {
+    "id": "gemini-3.1-pro-preview",
+    "provider": "google",
+    "apiModelId": "gemini-3.1-pro-preview",
+    "adapterMode": "openai",
+    "type": "text"
+  },
+  {
     "id": "models/imagen-4.0-generate-001",
     "provider": "google",
     "apiModelId": "models/imagen-4.0-generate-001",
@@ -102,9 +109,15 @@
     "type": "text"
   },
   {
-    "id": "kimi-k2",
+    "id": "kimi-k2-instruct",
     "provider": "groq",
     "apiModelId": "moonshotai/kimi-k2-instruct",
+    "type": "text"
+  },
+  {
+    "id": "kimi-k2-instruct-0905",
+    "provider": "groq",
+    "apiModelId": "moonshotai/kimi-k2-instruct-0905",
     "type": "text"
   },
   {

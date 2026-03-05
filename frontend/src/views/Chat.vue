@@ -284,6 +284,17 @@
                     <div v-if="msg.role === 'assistant' && msg.content === '' && !msg.isError" class="flex items-center gap-2 text-slate-400 italic">
                         <span class="animate-pulse">Generating response...</span>
                     </div>
+                    <div v-if="msg.role === 'user' && Array.isArray(msg.attachments) && msg.attachments.length > 0" class="mb-2 flex flex-wrap gap-2">
+                        <span
+                            v-for="(attachment, attachmentIndex) in msg.attachments"
+                            :key="`${index}-att-${attachmentIndex}`"
+                            class="inline-flex items-center gap-1 rounded-md border border-blue-400/40 bg-blue-500/20 px-2 py-1 text-[11px] font-medium text-blue-100"
+                        >
+                            <span>{{ attachment.kind === 'video' ? 'Video' : (attachment.kind === 'audio' ? 'Audio' : 'Image') }}</span>
+                            <span class="text-blue-200/70">-</span>
+                            <span class="truncate max-w-[220px]">{{ attachment.name }}</span>
+                        </span>
+                    </div>
                     <div class="whitespace-pre-wrap font-light tracking-wide">{{ msg.content }}</div>
                     </div>
                 </div>
@@ -292,18 +303,56 @@
              <!-- Input Area -->
              <div class="p-4 bg-slate-900 border-t border-slate-800/50 absolute bottom-0 left-0 right-0 z-10 backdrop-blur-md bg-opacity-95">
                 <div class="max-w-4xl mx-auto relative group">
+                    <input
+                        ref="mediaPicker"
+                        type="file"
+                        accept="image/*,video/*,audio/*"
+                        multiple
+                        class="hidden"
+                        @change="onMediaFilesSelected"
+                    >
+                    <div v-if="attachedMedia.length > 0" class="mb-2 flex flex-wrap gap-2">
+                        <span
+                            v-for="(file, fileIndex) in attachedMedia"
+                            :key="file.id"
+                            class="inline-flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                        >
+                            <span>{{ file.kind === 'video' ? 'Video' : (file.kind === 'audio' ? 'Audio' : 'Image') }}</span>
+                            <span class="text-slate-500">-</span>
+                            <span class="truncate max-w-[200px]">{{ file.name }}</span>
+                            <button
+                                @click="removeAttachedMedia(fileIndex)"
+                                type="button"
+                                class="ml-1 text-slate-400 hover:text-slate-200"
+                                :disabled="isGenerating"
+                            >
+                                x
+                            </button>
+                        </span>
+                    </div>
                     <textarea
                         v-model="input"
-                        @keydown.enter.prevent="sendMessage"
+                        @keydown="handleTextareaKeydown"
                         placeholder="Type your message..."
-                        class="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 pr-24 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none resize-none min-h-[60px] max-h-[200px] shadow-lg transition-all text-slate-200 placeholder:text-slate-600"
+                        class="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 pr-32 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none resize-none min-h-[60px] max-h-[200px] shadow-lg transition-all text-slate-200 placeholder:text-slate-600"
                         :disabled="isGenerating"
                     ></textarea>
                     
                     <div class="absolute bottom-3 right-3 flex items-center gap-2">
+                        <button
+                            @click="openMediaPicker"
+                            type="button"
+                            :disabled="isGenerating || !supportsTextMedia || attachedMedia.length >= MAX_MEDIA_ATTACHMENTS"
+                            class="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 p-2 rounded-lg transition-all shadow-md flex items-center justify-center"
+                            :title="supportsTextMedia ? 'Attach media files' : 'Attachments are available only for Gemini text models'"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7.414a2 2 0 00-.586-1.414l-3.414-3.414A2 2 0 0012.586 2H4zm8 1.414V7a1 1 0 001 1h2.586L12 4.414zM5 12a1 1 0 011.447-.894L8 11.764l1.553-2.658a1 1 0 011.741-.02l1.638 2.73 1.361-.68A1 1 0 0116 12v2a1 1 0 01-1 1H5a1 1 0 01-1-1v-2z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
                         <button 
                             @click="sendMessage"
-                            :disabled="!input.trim() || isGenerating"
+                            :disabled="(!input.trim() && attachedMedia.length === 0) || isGenerating"
                             class="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-all shadow-md flex items-center justify-center"
                         >
                             <svg v-if="!isGenerating" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -538,62 +587,136 @@
 
 <script setup>
 import { ref, onMounted, nextTick, watch, reactive, computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import Header from '../components/Header.vue';
 
-const input = ref('');
-const ttsInput = ref('');
-const imageInput = ref('');
-const videoInput = ref('');
-const messages = ref([]);
-const audioResults = ref([]);
-const imageResults = ref([]);
-const videoResults = ref([]);
-const models = ref([]);
-// const voices = ref([]); // Removed ref
-const selectedModel = ref('');
-const isGenerating = ref(false);
-const loadingModels = ref(true);
-const chatContainer = ref(null);
+const route = useRoute();
+const router = useRouter();
 
-// Sidebar Params
-const params = reactive({
+const KNOWN_QUERY_KEYS = new Set([
+    'model',
+    'temperature',
+    'topP',
+    'maxTokens',
+    'stream',
+    'thinking',
+    'thinkingBudget',
+    'includeThoughts',
+    'imageSize',
+    'imageAspectRatio',
+    'imageCount',
+    'imageFormat',
+    'videoAspectRatio',
+    'videoDurationSeconds',
+    'videoResolution',
+    'videoCount',
+    'audioLanguageId',
+    'audioVoiceSample',
+    'audioExaggeration',
+    'audioCfg'
+]);
+
+const DEFAULT_TEXT_PARAMS = Object.freeze({
     temperature: 0.7,
     topP: 0.95,
     maxTokens: undefined,
     stream: true,
-    thinking: {
-        enabled: false,
-        budget: 4096,
-        includeThoughts: false
-    }
+    thinkingEnabled: false,
+    thinkingBudget: 4096,
+    includeThoughts: false
 });
 
-const audioParams = reactive({
+const DEFAULT_AUDIO_PARAMS = Object.freeze({
     languageId: 'ru',
-    voiceSample: undefined, // undefined = default
+    voiceSample: undefined,
     exaggeration: 0.5,
     cfg: 0.5
 });
 
-const imageParams = reactive({
+const DEFAULT_IMAGE_PARAMS = Object.freeze({
     size: '1K',
     aspectRatio: '1:1',
     count: 1,
     format: 'image/png'
 });
 
-const videoParams = reactive({
+const DEFAULT_VIDEO_PARAMS = Object.freeze({
     aspectRatio: '16:9',
     durationSeconds: 8,
     resolution: '1080p',
     count: 1
 });
 
+const IMAGE_SIZES = ['1K', '2K'];
+const IMAGE_ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16'];
+const IMAGE_FORMATS = ['image/png', 'image/jpeg'];
+const VIDEO_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'];
+const VIDEO_RESOLUTIONS = ['720p', '1080p'];
+const AUDIO_LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh'];
+const MAX_MEDIA_ATTACHMENTS = 10;
+const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
+
+const input = ref('');
+const ttsInput = ref('');
+const imageInput = ref('');
+const videoInput = ref('');
+const mediaPicker = ref(null);
+const attachedMedia = ref([]);
+const messages = ref([]);
+const audioResults = ref([]);
+const imageResults = ref([]);
+const videoResults = ref([]);
+const models = ref([]);
+const selectedModel = ref('');
+const isGenerating = ref(false);
+const loadingModels = ref(true);
+const chatContainer = ref(null);
+const isApplyingQueryState = ref(false);
+const isUrlSyncReady = ref(false);
+
+// Sidebar Params
+const params = reactive({
+    temperature: DEFAULT_TEXT_PARAMS.temperature,
+    topP: DEFAULT_TEXT_PARAMS.topP,
+    maxTokens: DEFAULT_TEXT_PARAMS.maxTokens,
+    stream: DEFAULT_TEXT_PARAMS.stream,
+    thinking: {
+        enabled: DEFAULT_TEXT_PARAMS.thinkingEnabled,
+        budget: DEFAULT_TEXT_PARAMS.thinkingBudget,
+        includeThoughts: DEFAULT_TEXT_PARAMS.includeThoughts
+    }
+});
+
+const audioParams = reactive({
+    languageId: DEFAULT_AUDIO_PARAMS.languageId,
+    voiceSample: DEFAULT_AUDIO_PARAMS.voiceSample,
+    exaggeration: DEFAULT_AUDIO_PARAMS.exaggeration,
+    cfg: DEFAULT_AUDIO_PARAMS.cfg
+});
+
+const imageParams = reactive({
+    size: DEFAULT_IMAGE_PARAMS.size,
+    aspectRatio: DEFAULT_IMAGE_PARAMS.aspectRatio,
+    count: DEFAULT_IMAGE_PARAMS.count,
+    format: DEFAULT_IMAGE_PARAMS.format
+});
+
+const videoParams = reactive({
+    aspectRatio: DEFAULT_VIDEO_PARAMS.aspectRatio,
+    durationSeconds: DEFAULT_VIDEO_PARAMS.durationSeconds,
+    resolution: DEFAULT_VIDEO_PARAMS.resolution,
+    count: DEFAULT_VIDEO_PARAMS.count
+});
+
 const currentModel = computed(() => models.value.find(x => x.id === selectedModel.value));
 
 const currentModelType = computed(() => {
     return currentModel.value ? (currentModel.value.type || 'text') : 'text';
+});
+
+const supportsTextMedia = computed(() => {
+    return currentModelType.value === 'text' && currentModel.value?.provider === 'google';
 });
 
 // Voices are now derived from the selected model's additions
@@ -622,6 +745,207 @@ const videoModeLabel = computed(() => {
     return currentVideoMode.value || 'Video';
 });
 
+const toSingleQueryValue = (value) => {
+    if (Array.isArray(value)) return value[0];
+    if (typeof value === 'string') return value;
+    return undefined;
+};
+
+const toStringValue = (value) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    return String(value);
+};
+
+const parseBooleanQuery = (value) => {
+    if (value === 'true' || value === '1') return true;
+    if (value === 'false' || value === '0') return false;
+    return undefined;
+};
+
+const parseNumberQuery = (value, min, max) => {
+    if (value === undefined) return undefined;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return undefined;
+    if (min !== undefined && parsed < min) return undefined;
+    if (max !== undefined && parsed > max) return undefined;
+    return parsed;
+};
+
+const parseIntegerQuery = (value, min, max) => {
+    if (value === undefined) return undefined;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) return undefined;
+    if (min !== undefined && parsed < min) return undefined;
+    if (max !== undefined && parsed > max) return undefined;
+    return parsed;
+};
+
+const parseEnumQuery = (value, allowedValues) => {
+    if (value === undefined) return undefined;
+    return allowedValues.includes(value) ? value : undefined;
+};
+
+const getModelById = (modelId) => models.value.find((model) => model.id === modelId);
+
+const getImageModeForModel = (model) => {
+    if (!model || model.type !== 'image') return undefined;
+    return model.additions?.imageMode || model.imageMode || 'imagen';
+};
+
+const getUnknownRouteQuery = (query) => {
+    const unknownQuery = {};
+    for (const [key, value] of Object.entries(query)) {
+        if (!KNOWN_QUERY_KEYS.has(key)) {
+            unknownQuery[key] = value;
+        }
+    }
+    return unknownQuery;
+};
+
+const hasKnownQueryDiff = (nextKnownQuery, currentQuery) => {
+    for (const key of KNOWN_QUERY_KEYS) {
+        const currentValue = toSingleQueryValue(currentQuery[key]);
+        const nextValue = nextKnownQuery[key];
+        if ((currentValue ?? undefined) !== (nextValue ?? undefined)) {
+            return true;
+        }
+    }
+    return false;
+};
+
+const applyQueryToState = (query) => {
+    if (!models.value.length) return;
+
+    isApplyingQueryState.value = true;
+
+    try {
+        const requestedModelId = toSingleQueryValue(query.model);
+        const requestedModel = requestedModelId ? getModelById(requestedModelId) : undefined;
+        const existingModel = getModelById(selectedModel.value);
+        const safeModel = requestedModel || existingModel || models.value[0];
+
+        if (safeModel && selectedModel.value !== safeModel.id) {
+            selectedModel.value = safeModel.id;
+        }
+
+        params.temperature = parseNumberQuery(toSingleQueryValue(query.temperature), 0, 2) ?? DEFAULT_TEXT_PARAMS.temperature;
+        params.topP = parseNumberQuery(toSingleQueryValue(query.topP), 0, 1) ?? DEFAULT_TEXT_PARAMS.topP;
+        params.maxTokens = parseIntegerQuery(toSingleQueryValue(query.maxTokens), 1);
+        params.stream = parseBooleanQuery(toSingleQueryValue(query.stream)) ?? DEFAULT_TEXT_PARAMS.stream;
+        params.thinking.enabled = parseBooleanQuery(toSingleQueryValue(query.thinking)) ?? DEFAULT_TEXT_PARAMS.thinkingEnabled;
+        params.thinking.budget = parseIntegerQuery(toSingleQueryValue(query.thinkingBudget), 1024) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
+        params.thinking.includeThoughts = parseBooleanQuery(toSingleQueryValue(query.includeThoughts)) ?? DEFAULT_TEXT_PARAMS.includeThoughts;
+
+        imageParams.size = parseEnumQuery(toSingleQueryValue(query.imageSize), IMAGE_SIZES) ?? DEFAULT_IMAGE_PARAMS.size;
+        imageParams.aspectRatio = parseEnumQuery(toSingleQueryValue(query.imageAspectRatio), IMAGE_ASPECT_RATIOS) ?? DEFAULT_IMAGE_PARAMS.aspectRatio;
+
+        const selectedImageMode = getImageModeForModel(safeModel);
+        if (selectedImageMode === 'nano-banana') {
+            imageParams.count = DEFAULT_IMAGE_PARAMS.count;
+            imageParams.format = DEFAULT_IMAGE_PARAMS.format;
+        } else {
+            imageParams.count = parseIntegerQuery(toSingleQueryValue(query.imageCount), 1, 4) ?? DEFAULT_IMAGE_PARAMS.count;
+            imageParams.format = parseEnumQuery(toSingleQueryValue(query.imageFormat), IMAGE_FORMATS) ?? DEFAULT_IMAGE_PARAMS.format;
+        }
+
+        videoParams.aspectRatio = parseEnumQuery(toSingleQueryValue(query.videoAspectRatio), VIDEO_ASPECT_RATIOS) ?? DEFAULT_VIDEO_PARAMS.aspectRatio;
+        videoParams.durationSeconds = parseIntegerQuery(toSingleQueryValue(query.videoDurationSeconds), 1) ?? DEFAULT_VIDEO_PARAMS.durationSeconds;
+        videoParams.resolution = parseEnumQuery(toSingleQueryValue(query.videoResolution), VIDEO_RESOLUTIONS) ?? DEFAULT_VIDEO_PARAMS.resolution;
+        videoParams.count = parseIntegerQuery(toSingleQueryValue(query.videoCount), 1, 2) ?? DEFAULT_VIDEO_PARAMS.count;
+
+        audioParams.languageId = parseEnumQuery(toSingleQueryValue(query.audioLanguageId), AUDIO_LANGUAGES) ?? DEFAULT_AUDIO_PARAMS.languageId;
+        audioParams.exaggeration = parseNumberQuery(toSingleQueryValue(query.audioExaggeration), 0, 2) ?? DEFAULT_AUDIO_PARAMS.exaggeration;
+        audioParams.cfg = parseNumberQuery(toSingleQueryValue(query.audioCfg), 0, 2) ?? DEFAULT_AUDIO_PARAMS.cfg;
+
+        const requestedVoiceSample = toSingleQueryValue(query.audioVoiceSample);
+        const availableVoiceNames = safeModel?.type === 'audio'
+            ? (safeModel.additions?.voices || []).map((voice) => voice?.name).filter(Boolean)
+            : [];
+
+        if (requestedVoiceSample && availableVoiceNames.includes(requestedVoiceSample)) {
+            audioParams.voiceSample = requestedVoiceSample;
+        } else {
+            audioParams.voiceSample = DEFAULT_AUDIO_PARAMS.voiceSample;
+        }
+    } finally {
+        isApplyingQueryState.value = false;
+    }
+};
+
+const buildStateQuery = () => {
+    const safeTemperature = parseNumberQuery(toStringValue(params.temperature), 0, 2) ?? DEFAULT_TEXT_PARAMS.temperature;
+    const safeTopP = parseNumberQuery(toStringValue(params.topP), 0, 1) ?? DEFAULT_TEXT_PARAMS.topP;
+    const safeMaxTokens = parseIntegerQuery(toStringValue(params.maxTokens), 1);
+    const safeThinkingBudget = parseIntegerQuery(toStringValue(params.thinking.budget), 1024) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
+
+    const safeImageSize = parseEnumQuery(toStringValue(imageParams.size), IMAGE_SIZES) ?? DEFAULT_IMAGE_PARAMS.size;
+    const safeImageAspectRatio = parseEnumQuery(toStringValue(imageParams.aspectRatio), IMAGE_ASPECT_RATIOS) ?? DEFAULT_IMAGE_PARAMS.aspectRatio;
+    const safeImageCount = parseIntegerQuery(toStringValue(imageParams.count), 1, 4) ?? DEFAULT_IMAGE_PARAMS.count;
+    const safeImageFormat = parseEnumQuery(toStringValue(imageParams.format), IMAGE_FORMATS) ?? DEFAULT_IMAGE_PARAMS.format;
+
+    const safeVideoAspectRatio = parseEnumQuery(toStringValue(videoParams.aspectRatio), VIDEO_ASPECT_RATIOS) ?? DEFAULT_VIDEO_PARAMS.aspectRatio;
+    const safeVideoDuration = parseIntegerQuery(toStringValue(videoParams.durationSeconds), 1) ?? DEFAULT_VIDEO_PARAMS.durationSeconds;
+    const safeVideoResolution = parseEnumQuery(toStringValue(videoParams.resolution), VIDEO_RESOLUTIONS) ?? DEFAULT_VIDEO_PARAMS.resolution;
+    const safeVideoCount = parseIntegerQuery(toStringValue(videoParams.count), 1, 2) ?? DEFAULT_VIDEO_PARAMS.count;
+
+    const safeAudioLanguage = parseEnumQuery(toStringValue(audioParams.languageId), AUDIO_LANGUAGES) ?? DEFAULT_AUDIO_PARAMS.languageId;
+    const safeAudioExaggeration = parseNumberQuery(toStringValue(audioParams.exaggeration), 0, 2) ?? DEFAULT_AUDIO_PARAMS.exaggeration;
+    const safeAudioCfg = parseNumberQuery(toStringValue(audioParams.cfg), 0, 2) ?? DEFAULT_AUDIO_PARAMS.cfg;
+
+    const query = {
+        model: selectedModel.value || undefined,
+        temperature: String(safeTemperature),
+        topP: String(safeTopP),
+        stream: String(Boolean(params.stream)),
+        thinking: String(Boolean(params.thinking.enabled)),
+        thinkingBudget: String(safeThinkingBudget),
+        includeThoughts: String(Boolean(params.thinking.includeThoughts)),
+        imageSize: safeImageSize,
+        imageAspectRatio: safeImageAspectRatio,
+        videoAspectRatio: safeVideoAspectRatio,
+        videoDurationSeconds: String(safeVideoDuration),
+        videoResolution: safeVideoResolution,
+        videoCount: String(safeVideoCount),
+        audioLanguageId: safeAudioLanguage,
+        audioExaggeration: String(safeAudioExaggeration),
+        audioCfg: String(safeAudioCfg)
+    };
+
+    if (safeMaxTokens !== undefined) {
+        query.maxTokens = String(safeMaxTokens);
+    }
+
+    const activeImageMode = getImageModeForModel(currentModel.value);
+    if (activeImageMode !== 'nano-banana') {
+        query.imageCount = String(safeImageCount);
+        query.imageFormat = safeImageFormat;
+    }
+
+    if (typeof audioParams.voiceSample === 'string' && audioParams.voiceSample.length > 0) {
+        query.audioVoiceSample = audioParams.voiceSample;
+    }
+
+    return query;
+};
+
+const syncStateToQuery = async () => {
+    if (!isUrlSyncReady.value) return;
+
+    const nextKnownQuery = buildStateQuery();
+    if (!hasKnownQueryDiff(nextKnownQuery, route.query)) return;
+
+    const mergedQuery = {
+        ...getUnknownRouteQuery(route.query),
+        ...nextKnownQuery
+    };
+
+    try {
+        await router.replace({ query: mergedQuery });
+    } catch (error) {
+        console.error('Failed to sync URL params', error);
+    }
+};
+
 const scrollToBottom = async () => {
   await nextTick();
   if (chatContainer.value) {
@@ -631,43 +955,233 @@ const scrollToBottom = async () => {
 
 watch(messages, () => scrollToBottom(), { deep: true });
 
+watch(
+    () => route.query,
+    (query) => {
+        if (!isUrlSyncReady.value || isApplyingQueryState.value) return;
+        applyQueryToState(query);
+    }
+);
+
+watch(
+    () => [
+        selectedModel.value,
+        params.temperature,
+        params.topP,
+        params.maxTokens,
+        params.stream,
+        params.thinking.enabled,
+        params.thinking.budget,
+        params.thinking.includeThoughts,
+        imageParams.size,
+        imageParams.aspectRatio,
+        imageParams.count,
+        imageParams.format,
+        videoParams.aspectRatio,
+        videoParams.durationSeconds,
+        videoParams.resolution,
+        videoParams.count,
+        audioParams.languageId,
+        audioParams.voiceSample,
+        audioParams.exaggeration,
+        audioParams.cfg,
+        currentImageMode.value
+    ],
+    () => {
+        if (!isUrlSyncReady.value || isApplyingQueryState.value) return;
+        syncStateToQuery();
+    }
+);
+
+watch(
+    () => [selectedModel.value, voices.value.map((voice) => voice?.name || '').join('|')],
+    () => {
+        if (!audioParams.voiceSample || currentModelType.value !== 'audio') return;
+        const isValidVoice = voices.value.some((voice) => voice?.name === audioParams.voiceSample);
+        if (!isValidVoice) {
+            audioParams.voiceSample = DEFAULT_AUDIO_PARAMS.voiceSample;
+        }
+    }
+);
+
+watch(
+    supportsTextMedia,
+    (enabled) => {
+        if (!enabled && attachedMedia.value.length > 0) {
+            clearAttachedMedia();
+        }
+    }
+);
+
 // Fetch models
 const init = async () => {
     try {
         const res = await axios.get('/available-models');
         
         models.value = res.data.models;
-        // voices.value = vRes.data.voices || []; // Removed
 
         if (models.value.length > 0) {
-           // Default selection logic could be smarter (e.g. remember last used)
-           if (!selectedModel.value) selectedModel.value = models.value[0].id;
+            applyQueryToState(route.query);
+
+            if (!models.value.some((model) => model.id === selectedModel.value)) {
+                selectedModel.value = models.value[0].id;
+            }
         }
     } catch (err) {
         console.error('Init failed', err);
     } finally {
         loadingModels.value = false;
+        isUrlSyncReady.value = true;
+        await syncStateToQuery();
     }
 };
 
+const isSupportedTextMedia = (mimeType) => {
+    if (typeof mimeType !== 'string') return false;
+    const normalized = mimeType.toLowerCase();
+    return TEXT_MEDIA_ACCEPTED_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+};
+
+const openMediaPicker = () => {
+    if (isGenerating.value) return;
+    if (!supportsTextMedia.value) {
+        alert('Media attachments are currently available only for Gemini text models.');
+        return;
+    }
+    mediaPicker.value?.click();
+};
+
+const removeAttachedMedia = (fileIndex) => {
+    attachedMedia.value.splice(fileIndex, 1);
+};
+
+const clearAttachedMedia = () => {
+    attachedMedia.value = [];
+    if (mediaPicker.value) {
+        mediaPicker.value.value = '';
+    }
+};
+
+const onMediaFilesSelected = (event) => {
+    const selectedFiles = Array.from(event?.target?.files || []);
+    if (selectedFiles.length === 0) return;
+
+    const slotsLeft = Math.max(0, MAX_MEDIA_ATTACHMENTS - attachedMedia.value.length);
+    if (slotsLeft === 0) {
+        alert(`You can attach up to ${MAX_MEDIA_ATTACHMENTS} files per request.`);
+        event.target.value = '';
+        return;
+    }
+
+    const accepted = [];
+    const rejected = [];
+
+    for (const file of selectedFiles) {
+        if (!isSupportedTextMedia(file.type)) {
+            rejected.push(file.name || 'unknown-file');
+            continue;
+        }
+
+        if (accepted.length >= slotsLeft) {
+            break;
+        }
+
+        const kind = file.type.startsWith('video/')
+            ? 'video'
+            : (file.type.startsWith('audio/') ? 'audio' : 'image');
+
+        accepted.push({
+            id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+            file,
+            name: file.name,
+            mimeType: file.type,
+            kind
+        });
+    }
+
+    if (accepted.length > 0) {
+        attachedMedia.value.push(...accepted);
+    }
+
+    const skippedForLimit = selectedFiles.length - accepted.length - rejected.length;
+    if (rejected.length > 0) {
+        alert(`Unsupported media type skipped:\n${rejected.join('\n')}`);
+    } else if (skippedForLimit > 0) {
+        alert(`Only ${MAX_MEDIA_ATTACHMENTS} attachments are allowed per request.`);
+    }
+
+    event.target.value = '';
+};
+
+const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        const commaIndex = result.indexOf(',');
+        resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error(`Failed to read file: ${file?.name || 'unknown'}`));
+    reader.readAsDataURL(file);
+});
+
+const buildMediaPayload = async (files) => {
+    return Promise.all(files.map(async (entry) => ({
+        type: entry.kind,
+        mimeType: entry.mimeType,
+        name: entry.name,
+        data: await readFileAsBase64(entry.file)
+    })));
+};
+
+const handleTextareaKeydown = (event) => {
+    if (event.key !== 'Enter') return;
+    if (event.shiftKey) return;
+    event.preventDefault();
+    sendMessage();
+};
+
 const sendMessage = async () => {
-  if (!input.value.trim() || isGenerating.value) return;
+  if ((!input.value.trim() && attachedMedia.value.length === 0) || isGenerating.value) return;
+  if (attachedMedia.value.length > 0 && !supportsTextMedia.value) {
+    alert('Media attachments are currently available only for Gemini text models.');
+    return;
+  }
 
   const userText = input.value;
+  const pendingAttachments = attachedMedia.value.map((item) => ({
+    ...item
+  }));
+
   input.value = '';
+  clearAttachedMedia();
   
-  messages.value.push({ role: 'user', content: userText });
+  messages.value.push({
+    role: 'user',
+    content: userText,
+    attachments: pendingAttachments.map((item) => ({
+      name: item.name,
+      mimeType: item.mimeType,
+      kind: item.kind
+    }))
+  });
   isGenerating.value = true;
 
   try {
+    const mediaPayload = await buildMediaPayload(pendingAttachments);
+    const shouldStream = params.stream && mediaPayload.length === 0;
+
     const payload = {
         model: selectedModel.value,
         messages: messages.value.map(m => ({ role: m.role, content: m.content })),
-        stream: params.stream,
+        stream: shouldStream,
         temperature: params.temperature,
         topP: params.topP,
         maxTokens: params.maxTokens || undefined
     };
+
+    if (mediaPayload.length > 0) {
+        payload.media = mediaPayload;
+    }
 
     if (params.thinking.enabled) {
         payload.thinking = {
@@ -676,7 +1190,7 @@ const sendMessage = async () => {
         };
     }
 
-    if (params.stream) {
+    if (shouldStream) {
         const response = await fetch('/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
