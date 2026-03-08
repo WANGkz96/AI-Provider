@@ -10,6 +10,14 @@ import { ChatterboxAdapter } from '../adapters/chatterbox.js';
 
 const router = express.Router();
 
+const GEMINI_TTS_VOICE_NAMES = [
+  'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda',
+  'Orus', 'Aoede', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus',
+  'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi',
+  'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima',
+  'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'
+];
+
 // Initialize Providers
 const providers = {
   google: new GoogleAdapter(config),
@@ -60,7 +68,13 @@ const runSchema = z.object({
     languageId: z.string().optional(),
     exaggeration: z.number().min(0).max(2).optional(),
     cfg: z.number().min(0).max(2).optional(),
-    voiceSample: z.string().optional()
+    voiceSample: z.string().optional(),
+    mode: z.enum(['single', 'multi']).optional(),
+    voiceName: z.string().optional(),
+    speakers: z.array(z.object({
+      speaker: z.string().min(1),
+      voiceName: z.string().min(1)
+    })).max(2).optional()
   }).optional(),
 
   // Image generation params
@@ -207,13 +221,25 @@ router.get('/available-models', async (req, res) => {
         }
 
         // Additions (e.g. Voices / Image modes)
-        if (m.type === 'audio' && m.provider === 'chatterbox' && available) {
-            console.log(`[API] Checking additions for ${m.id}. Provider has getVoices: ${!!provider.getVoices}`);
-            if (provider.getVoices) {
-                console.log(`[API] Fetching voices for ${m.id} from ${m.baseUrl}`);
-                const voices = await provider.getVoices(m.baseUrl);
-                console.log(`[API] Got voices: ${voices ? voices.length : 'null'}`);
-                additions.voices = voices;
+        if (m.type === 'audio' && available) {
+            if (m.audioMode) {
+                additions.audioMode = m.audioMode;
+            } else if (m.provider === 'chatterbox') {
+                additions.audioMode = 'chatterbox';
+            } else if (m.provider === 'google') {
+                additions.audioMode = 'gemini-tts';
+            }
+
+            if (m.provider === 'chatterbox') {
+                console.log(`[API] Checking additions for ${m.id}. Provider has getVoices: ${!!provider.getVoices}`);
+                if (provider.getVoices) {
+                    console.log(`[API] Fetching voices for ${m.id} from ${m.baseUrl}`);
+                    const voices = await provider.getVoices(m.baseUrl);
+                    console.log(`[API] Got voices: ${voices ? voices.length : 'null'}`);
+                    additions.voices = voices;
+                }
+            } else if (m.provider === 'google' && (additions.audioMode === 'gemini-tts')) {
+                additions.voices = GEMINI_TTS_VOICE_NAMES.map((name) => ({ name }));
             }
         }
 
@@ -307,7 +333,10 @@ router.post('/run', async (req, res) => {
             languageId: body.tts?.languageId,
             exaggeration: body.tts?.exaggeration,
             cfg: body.tts?.cfg,
-            voiceSample: body.tts?.voiceSample
+            voiceSample: body.tts?.voiceSample,
+            ttsMode: body.tts?.mode,
+            voiceName: body.tts?.voiceName,
+            speakers: body.tts?.speakers
         }
     };
 
@@ -338,14 +367,19 @@ router.post('/run', async (req, res) => {
       const response = await provider.generate({ ...generateParams, stream: false });
       
       if (targetModel.type === 'audio') {
-          // If audio, response should be { type: 'audio', audioUrl: '...' }
-          if (response.type === 'audio' && response.audioUrl) {
-              res.json({ 
-                  type: 'audio', 
-                  audioUrl: response.audioUrl,
+          if (response.type === 'audio' && (response.audioUrl || response.data)) {
+              res.json({
+                  type: 'audio',
+                  audioUrl: response.audioUrl || null,
+                  audio: response.data ? {
+                      data: response.data,
+                      mimeType: response.mimeType || 'audio/wav'
+                  } : null,
                   metadata: {
-                      duration: response.duration,
-                      voice: response.usedVoice
+                      ...(response.metadata || {}),
+                      mode: response.metadata?.mode || targetModel.audioMode || (targetModel.provider === 'google' ? 'gemini-tts' : (targetModel.provider === 'chatterbox' ? 'chatterbox' : null)),
+                      duration: response.duration ?? response.metadata?.duration ?? null,
+                      voice: response.usedVoice ?? response.metadata?.voice ?? null
                   }
               });
           } else {

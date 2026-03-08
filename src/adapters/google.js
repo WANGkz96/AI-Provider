@@ -52,6 +52,10 @@ export class GoogleAdapter extends BaseAdapter {
       return this.generateVideo({ ...params, model: targetModel });
     }
 
+    if (type === 'audio') {
+      return this.generateGeminiTtsAudio({ ...params, model: targetModel });
+    }
+
     if (type === 'text' && Array.isArray(media) && media.length > 0) {
       return this.generateMultimodalViaGemini({ ...params, model: targetModel });
     }
@@ -534,6 +538,146 @@ export class GoogleAdapter extends BaseAdapter {
       totalTokens: usageMetadata.totalTokenCount ?? null,
       raw: usageMetadata
     };
+  }
+
+  async generateGeminiTtsAudio({ model, prompt, messages, options }) {
+    if (!this.imageAI) {
+      throw new Error('Gemini TTS requires a valid API key');
+    }
+
+    const promptText = prompt || messages?.[messages.length - 1]?.content;
+    if (!promptText) {
+      throw new Error('No prompt provided for TTS generation');
+    }
+
+    const ttsMode = options?.ttsMode === 'multi' ? 'multi' : 'single';
+    const sampleRateHz = 24000;
+    let speechConfig;
+    let usedVoice = null;
+    let usedSpeakers = null;
+
+    if (ttsMode === 'multi') {
+      const normalizedSpeakers = this.normalizeGeminiTtsSpeakers(options?.speakers);
+      speechConfig = {
+        multiSpeakerVoiceConfig: {
+          speakerVoiceConfigs: normalizedSpeakers.map((speakerConfig) => ({
+            speaker: speakerConfig.speaker,
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: speakerConfig.voiceName
+              }
+            }
+          }))
+        }
+      };
+      usedSpeakers = normalizedSpeakers;
+    } else {
+      const voiceName = options?.voiceName || 'Kore';
+      speechConfig = {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName
+          }
+        }
+      };
+      usedVoice = voiceName;
+    }
+
+    const response = await this.imageAI.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: String(promptText) }]
+        }
+      ],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig
+      }
+    });
+
+    const inlineAudio = this.extractGeminiInlineAudio(response);
+    if (!inlineAudio?.data) {
+      throw new Error('Gemini TTS returned no audio payload');
+    }
+
+    const pcmBuffer = Buffer.from(inlineAudio.data, 'base64');
+    const wavBuffer = this.wrapPcmAsWav(pcmBuffer, {
+      sampleRateHz,
+      channels: 1,
+      bitsPerSample: 16
+    });
+    const duration = this.estimatePcmDurationSeconds(pcmBuffer, sampleRateHz, 1, 16);
+
+    return {
+      type: 'audio',
+      data: wavBuffer.toString('base64'),
+      mimeType: 'audio/wav',
+      duration,
+      usedVoice,
+      metadata: {
+        mode: 'gemini-tts',
+        model,
+        sourceMimeType: inlineAudio.mimeType || 'audio/pcm',
+        sampleRateHz,
+        voice: usedVoice,
+        speakers: usedSpeakers
+      }
+    };
+  }
+
+  normalizeGeminiTtsSpeakers(speakers) {
+    const defaultSpeakers = [
+      { speaker: 'Speaker1', voiceName: 'Kore' },
+      { speaker: 'Speaker2', voiceName: 'Puck' }
+    ];
+
+    if (!Array.isArray(speakers) || speakers.length === 0) {
+      return defaultSpeakers;
+    }
+
+    return speakers
+      .slice(0, 2)
+      .map((entry, index) => ({
+        speaker: this.normalizeText(entry?.speaker).trim() || defaultSpeakers[index]?.speaker || `Speaker${index + 1}`,
+        voiceName: this.normalizeText(entry?.voiceName).trim() || defaultSpeakers[index]?.voiceName || 'Kore'
+      }));
+  }
+
+  extractGeminiInlineAudio(response) {
+    const parts = response?.candidates?.[0]?.content?.parts || [];
+    return parts.find((part) => part?.inlineData?.data)?.inlineData || null;
+  }
+
+  wrapPcmAsWav(pcmBuffer, { sampleRateHz, channels, bitsPerSample }) {
+    const bytesPerSample = bitsPerSample / 8;
+    const byteRate = sampleRateHz * channels * bytesPerSample;
+    const blockAlign = channels * bytesPerSample;
+    const dataSize = pcmBuffer.length;
+    const header = Buffer.alloc(44);
+
+    header.write('RIFF', 0);
+    header.writeUInt32LE(36 + dataSize, 4);
+    header.write('WAVE', 8);
+    header.write('fmt ', 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(channels, 22);
+    header.writeUInt32LE(sampleRateHz, 24);
+    header.writeUInt32LE(byteRate, 28);
+    header.writeUInt16LE(blockAlign, 32);
+    header.writeUInt16LE(bitsPerSample, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(dataSize, 40);
+
+    return Buffer.concat([header, pcmBuffer]);
+  }
+
+  estimatePcmDurationSeconds(pcmBuffer, sampleRateHz, channels, bitsPerSample) {
+    const bytesPerSecond = sampleRateHz * channels * (bitsPerSample / 8);
+    if (bytesPerSecond <= 0) return null;
+    return Number((pcmBuffer.length / bytesPerSecond).toFixed(2));
   }
 
   async generateImage({ model, prompt, messages, image, imageMode }) {

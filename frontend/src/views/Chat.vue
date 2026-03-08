@@ -183,6 +183,59 @@
         <template v-else-if="currentModelType === 'audio'">
              <div class="space-y-6">
                 <div>
+                   <label class="text-xs font-medium text-slate-400 block mb-1.5">Audio Mode</label>
+                   <div class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs text-slate-200">
+                      {{ audioModeLabel }}
+                   </div>
+                </div>
+
+                <template v-if="currentAudioMode === 'gemini-tts'">
+                    <div>
+                       <label class="text-xs font-medium text-slate-400 block mb-1.5">Speaker Mode</label>
+                       <select v-model="audioParams.geminiMode" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                          <option value="single">Single Speaker</option>
+                          <option value="multi">Multi Speaker (2)</option>
+                       </select>
+                    </div>
+
+                    <div v-if="audioParams.geminiMode === 'single'">
+                        <label class="text-xs font-medium text-slate-400 block mb-1.5">Voice</label>
+                        <select v-model="audioParams.voiceName" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                           <option v-for="voice in voices" :key="`gemini-single-${voice.name}`" :value="voice.name">{{ voice.name }}</option>
+                        </select>
+                    </div>
+
+                    <div v-else class="space-y-4">
+                        <div class="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                            <label class="text-xs font-medium text-slate-400 block mb-1.5">Speaker 1 Name</label>
+                            <input
+                                v-model="audioParams.speaker1Name"
+                                type="text"
+                                class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none"
+                            >
+                            <label class="text-xs font-medium text-slate-400 block mt-3 mb-1.5">Speaker 1 Voice</label>
+                            <select v-model="audioParams.speaker1VoiceName" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                                <option v-for="voice in voices" :key="`gemini-s1-${voice.name}`" :value="voice.name">{{ voice.name }}</option>
+                            </select>
+                        </div>
+
+                        <div class="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                            <label class="text-xs font-medium text-slate-400 block mb-1.5">Speaker 2 Name</label>
+                            <input
+                                v-model="audioParams.speaker2Name"
+                                type="text"
+                                class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none"
+                            >
+                            <label class="text-xs font-medium text-slate-400 block mt-3 mb-1.5">Speaker 2 Voice</label>
+                            <select v-model="audioParams.speaker2VoiceName" class="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
+                                <option v-for="voice in voices" :key="`gemini-s2-${voice.name}`" :value="voice.name">{{ voice.name }}</option>
+                            </select>
+                        </div>
+                    </div>
+                </template>
+
+                <template v-else>
+                <div>
                    <label class="text-xs font-medium text-slate-400 block mb-1.5">Voice Sample</label>
                    <select v-model="audioParams.voiceSample" class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-xs focus:border-blue-500 outline-none">
                       <option :value="undefined">Default</option>
@@ -228,6 +281,7 @@
                     >
                      <p class="text-[10px] text-slate-600 mt-1">Lower = faster. 0.5 is standard.</p>
                 </div>
+                </template>
              </div>
         </template>
       </div>
@@ -566,13 +620,13 @@
                              </div>
                              <div class="flex-1 min-w-0">
                                  <p class="text-sm text-slate-200 truncate mb-1">"{{ result.text }}"</p>
-                                 <div class="text-xs text-slate-500 flex gap-2">
-                                     <span>{{ result.metadata?.voice }}</span>
-                                     <span>•</span>
-                                     <span>{{ result.metadata?.duration }}s</span>
+                                 <div class="text-xs text-slate-500 flex gap-2 flex-wrap">
+                                     <span v-if="result.metadata?.mode">{{ result.metadata.mode }}</span>
+                                     <span v-if="result.metadata?.voice">{{ result.metadata.voice }}</span>
+                                     <span v-if="result.metadata?.duration !== null && result.metadata?.duration !== undefined">{{ result.metadata.duration }}s</span>
                                  </div>
                              </div>
-                             <audio controls :src="result.audioUrl" class="h-8 w-48"></audio>
+                             <audio controls :src="result.audioUrl || result.playbackUrl" class="h-8 w-48"></audio>
                         </div>
                     </div>
 
@@ -614,7 +668,13 @@ const KNOWN_QUERY_KEYS = new Set([
     'audioLanguageId',
     'audioVoiceSample',
     'audioExaggeration',
-    'audioCfg'
+    'audioCfg',
+    'audioTtsMode',
+    'audioVoiceName',
+    'audioSpeaker1Name',
+    'audioSpeaker1VoiceName',
+    'audioSpeaker2Name',
+    'audioSpeaker2VoiceName'
 ]);
 
 const DEFAULT_TEXT_PARAMS = Object.freeze({
@@ -631,7 +691,13 @@ const DEFAULT_AUDIO_PARAMS = Object.freeze({
     languageId: 'ru',
     voiceSample: undefined,
     exaggeration: 0.5,
-    cfg: 0.5
+    cfg: 0.5,
+    geminiMode: 'single',
+    voiceName: 'Kore',
+    speaker1Name: 'Speaker1',
+    speaker1VoiceName: 'Kore',
+    speaker2Name: 'Speaker2',
+    speaker2VoiceName: 'Puck'
 });
 
 const DEFAULT_IMAGE_PARAMS = Object.freeze({
@@ -654,6 +720,7 @@ const IMAGE_FORMATS = ['image/png', 'image/jpeg'];
 const VIDEO_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'];
 const VIDEO_RESOLUTIONS = ['720p', '1080p'];
 const AUDIO_LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh'];
+const GEMINI_TTS_MODES = ['single', 'multi'];
 const MAX_MEDIA_ATTACHMENTS = 10;
 const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
 
@@ -692,7 +759,13 @@ const audioParams = reactive({
     languageId: DEFAULT_AUDIO_PARAMS.languageId,
     voiceSample: DEFAULT_AUDIO_PARAMS.voiceSample,
     exaggeration: DEFAULT_AUDIO_PARAMS.exaggeration,
-    cfg: DEFAULT_AUDIO_PARAMS.cfg
+    cfg: DEFAULT_AUDIO_PARAMS.cfg,
+    geminiMode: DEFAULT_AUDIO_PARAMS.geminiMode,
+    voiceName: DEFAULT_AUDIO_PARAMS.voiceName,
+    speaker1Name: DEFAULT_AUDIO_PARAMS.speaker1Name,
+    speaker1VoiceName: DEFAULT_AUDIO_PARAMS.speaker1VoiceName,
+    speaker2Name: DEFAULT_AUDIO_PARAMS.speaker2Name,
+    speaker2VoiceName: DEFAULT_AUDIO_PARAMS.speaker2VoiceName
 });
 
 const imageParams = reactive({
@@ -745,6 +818,17 @@ const videoModeLabel = computed(() => {
     return currentVideoMode.value || 'Video';
 });
 
+const currentAudioMode = computed(() => {
+    if (currentModelType.value !== 'audio') return undefined;
+    return currentModel.value?.additions?.audioMode || currentModel.value?.audioMode || (currentModel.value?.provider === 'google' ? 'gemini-tts' : 'chatterbox');
+});
+
+const audioModeLabel = computed(() => {
+    if (currentAudioMode.value === 'gemini-tts') return 'Gemini 2.5 TTS';
+    if (currentAudioMode.value === 'chatterbox') return 'Chatterbox';
+    return currentAudioMode.value || 'Audio';
+});
+
 const toSingleQueryValue = (value) => {
     if (Array.isArray(value)) return value[0];
     if (typeof value === 'string') return value;
@@ -790,6 +874,11 @@ const getModelById = (modelId) => models.value.find((model) => model.id === mode
 const getImageModeForModel = (model) => {
     if (!model || model.type !== 'image') return undefined;
     return model.additions?.imageMode || model.imageMode || 'imagen';
+};
+
+const getAudioModeForModel = (model) => {
+    if (!model || model.type !== 'audio') return undefined;
+    return model.additions?.audioMode || model.audioMode || (model.provider === 'google' ? 'gemini-tts' : 'chatterbox');
 };
 
 const getUnknownRouteQuery = (query) => {
@@ -853,19 +942,45 @@ const applyQueryToState = (query) => {
         videoParams.resolution = parseEnumQuery(toSingleQueryValue(query.videoResolution), VIDEO_RESOLUTIONS) ?? DEFAULT_VIDEO_PARAMS.resolution;
         videoParams.count = parseIntegerQuery(toSingleQueryValue(query.videoCount), 1, 2) ?? DEFAULT_VIDEO_PARAMS.count;
 
-        audioParams.languageId = parseEnumQuery(toSingleQueryValue(query.audioLanguageId), AUDIO_LANGUAGES) ?? DEFAULT_AUDIO_PARAMS.languageId;
-        audioParams.exaggeration = parseNumberQuery(toSingleQueryValue(query.audioExaggeration), 0, 2) ?? DEFAULT_AUDIO_PARAMS.exaggeration;
-        audioParams.cfg = parseNumberQuery(toSingleQueryValue(query.audioCfg), 0, 2) ?? DEFAULT_AUDIO_PARAMS.cfg;
-
-        const requestedVoiceSample = toSingleQueryValue(query.audioVoiceSample);
+        const selectedAudioMode = getAudioModeForModel(safeModel);
         const availableVoiceNames = safeModel?.type === 'audio'
             ? (safeModel.additions?.voices || []).map((voice) => voice?.name).filter(Boolean)
             : [];
+        const defaultVoiceName = availableVoiceNames[0] || DEFAULT_AUDIO_PARAMS.voiceName;
 
+        audioParams.languageId = parseEnumQuery(toSingleQueryValue(query.audioLanguageId), AUDIO_LANGUAGES) ?? DEFAULT_AUDIO_PARAMS.languageId;
+        audioParams.exaggeration = parseNumberQuery(toSingleQueryValue(query.audioExaggeration), 0, 2) ?? DEFAULT_AUDIO_PARAMS.exaggeration;
+        audioParams.cfg = parseNumberQuery(toSingleQueryValue(query.audioCfg), 0, 2) ?? DEFAULT_AUDIO_PARAMS.cfg;
+        audioParams.geminiMode = parseEnumQuery(toSingleQueryValue(query.audioTtsMode), GEMINI_TTS_MODES) ?? DEFAULT_AUDIO_PARAMS.geminiMode;
+        audioParams.speaker1Name = toSingleQueryValue(query.audioSpeaker1Name) || DEFAULT_AUDIO_PARAMS.speaker1Name;
+        audioParams.speaker2Name = toSingleQueryValue(query.audioSpeaker2Name) || DEFAULT_AUDIO_PARAMS.speaker2Name;
+
+        const requestedVoiceSample = toSingleQueryValue(query.audioVoiceSample);
         if (requestedVoiceSample && availableVoiceNames.includes(requestedVoiceSample)) {
             audioParams.voiceSample = requestedVoiceSample;
         } else {
             audioParams.voiceSample = DEFAULT_AUDIO_PARAMS.voiceSample;
+        }
+
+        const requestedVoiceName = toSingleQueryValue(query.audioVoiceName);
+        if (requestedVoiceName && availableVoiceNames.includes(requestedVoiceName)) {
+            audioParams.voiceName = requestedVoiceName;
+        } else {
+            audioParams.voiceName = defaultVoiceName;
+        }
+
+        const requestedSpeaker1Voice = toSingleQueryValue(query.audioSpeaker1VoiceName);
+        const requestedSpeaker2Voice = toSingleQueryValue(query.audioSpeaker2VoiceName);
+        audioParams.speaker1VoiceName = (requestedSpeaker1Voice && availableVoiceNames.includes(requestedSpeaker1Voice))
+            ? requestedSpeaker1Voice
+            : defaultVoiceName;
+        audioParams.speaker2VoiceName = (requestedSpeaker2Voice && availableVoiceNames.includes(requestedSpeaker2Voice))
+            ? requestedSpeaker2Voice
+            : (availableVoiceNames[1] || defaultVoiceName);
+
+        if (selectedAudioMode !== 'gemini-tts') {
+            audioParams.geminiMode = DEFAULT_AUDIO_PARAMS.geminiMode;
+            audioParams.voiceName = defaultVoiceName;
         }
     } finally {
         isApplyingQueryState.value = false;
@@ -891,6 +1006,12 @@ const buildStateQuery = () => {
     const safeAudioLanguage = parseEnumQuery(toStringValue(audioParams.languageId), AUDIO_LANGUAGES) ?? DEFAULT_AUDIO_PARAMS.languageId;
     const safeAudioExaggeration = parseNumberQuery(toStringValue(audioParams.exaggeration), 0, 2) ?? DEFAULT_AUDIO_PARAMS.exaggeration;
     const safeAudioCfg = parseNumberQuery(toStringValue(audioParams.cfg), 0, 2) ?? DEFAULT_AUDIO_PARAMS.cfg;
+    const safeAudioTtsMode = parseEnumQuery(toStringValue(audioParams.geminiMode), GEMINI_TTS_MODES) ?? DEFAULT_AUDIO_PARAMS.geminiMode;
+    const safeAudioSpeaker1Name = toStringValue(audioParams.speaker1Name) ?? DEFAULT_AUDIO_PARAMS.speaker1Name;
+    const safeAudioSpeaker2Name = toStringValue(audioParams.speaker2Name) ?? DEFAULT_AUDIO_PARAMS.speaker2Name;
+    const safeAudioVoiceName = toStringValue(audioParams.voiceName) ?? DEFAULT_AUDIO_PARAMS.voiceName;
+    const safeAudioSpeaker1VoiceName = toStringValue(audioParams.speaker1VoiceName) ?? DEFAULT_AUDIO_PARAMS.speaker1VoiceName;
+    const safeAudioSpeaker2VoiceName = toStringValue(audioParams.speaker2VoiceName) ?? DEFAULT_AUDIO_PARAMS.speaker2VoiceName;
 
     const query = {
         model: selectedModel.value || undefined,
@@ -908,7 +1029,13 @@ const buildStateQuery = () => {
         videoCount: String(safeVideoCount),
         audioLanguageId: safeAudioLanguage,
         audioExaggeration: String(safeAudioExaggeration),
-        audioCfg: String(safeAudioCfg)
+        audioCfg: String(safeAudioCfg),
+        audioTtsMode: safeAudioTtsMode,
+        audioSpeaker1Name: safeAudioSpeaker1Name,
+        audioSpeaker1VoiceName: safeAudioSpeaker1VoiceName,
+        audioSpeaker2Name: safeAudioSpeaker2Name,
+        audioSpeaker2VoiceName: safeAudioSpeaker2VoiceName,
+        audioVoiceName: safeAudioVoiceName
     };
 
     if (safeMaxTokens !== undefined) {
@@ -985,6 +1112,12 @@ watch(
         audioParams.voiceSample,
         audioParams.exaggeration,
         audioParams.cfg,
+        audioParams.geminiMode,
+        audioParams.voiceName,
+        audioParams.speaker1Name,
+        audioParams.speaker1VoiceName,
+        audioParams.speaker2Name,
+        audioParams.speaker2VoiceName,
         currentImageMode.value
     ],
     () => {
@@ -996,10 +1129,26 @@ watch(
 watch(
     () => [selectedModel.value, voices.value.map((voice) => voice?.name || '').join('|')],
     () => {
-        if (!audioParams.voiceSample || currentModelType.value !== 'audio') return;
-        const isValidVoice = voices.value.some((voice) => voice?.name === audioParams.voiceSample);
-        if (!isValidVoice) {
-            audioParams.voiceSample = DEFAULT_AUDIO_PARAMS.voiceSample;
+        if (currentModelType.value !== 'audio') return;
+
+        const availableVoiceNames = voices.value.map((voice) => voice?.name).filter(Boolean);
+        const fallbackVoice = availableVoiceNames[0] || DEFAULT_AUDIO_PARAMS.voiceName;
+
+        if (audioParams.voiceSample) {
+            const isValidVoiceSample = availableVoiceNames.includes(audioParams.voiceSample);
+            if (!isValidVoiceSample) {
+                audioParams.voiceSample = DEFAULT_AUDIO_PARAMS.voiceSample;
+            }
+        }
+
+        if (!availableVoiceNames.includes(audioParams.voiceName)) {
+            audioParams.voiceName = fallbackVoice;
+        }
+        if (!availableVoiceNames.includes(audioParams.speaker1VoiceName)) {
+            audioParams.speaker1VoiceName = fallbackVoice;
+        }
+        if (!availableVoiceNames.includes(audioParams.speaker2VoiceName)) {
+            audioParams.speaker2VoiceName = availableVoiceNames[1] || fallbackVoice;
         }
     }
 );
@@ -1010,6 +1159,16 @@ watch(
         if (!enabled && attachedMedia.value.length > 0) {
             clearAttachedMedia();
         }
+    }
+);
+
+watch(
+    currentAudioMode,
+    (mode) => {
+        if (mode !== 'gemini-tts') return;
+        audioParams.geminiMode = parseEnumQuery(toStringValue(audioParams.geminiMode), GEMINI_TTS_MODES) ?? DEFAULT_AUDIO_PARAMS.geminiMode;
+        audioParams.speaker1Name = toStringValue(audioParams.speaker1Name) ?? DEFAULT_AUDIO_PARAMS.speaker1Name;
+        audioParams.speaker2Name = toStringValue(audioParams.speaker2Name) ?? DEFAULT_AUDIO_PARAMS.speaker2Name;
     }
 );
 
@@ -1377,25 +1536,53 @@ const generateAudio = async () => {
     isGenerating.value = true;
     
     try {
+        const ttsPayload = {};
+
+        if (currentAudioMode.value === 'gemini-tts') {
+            if (audioParams.geminiMode === 'multi') {
+                ttsPayload.mode = 'multi';
+                ttsPayload.speakers = [
+                    {
+                        speaker: (audioParams.speaker1Name || DEFAULT_AUDIO_PARAMS.speaker1Name).trim(),
+                        voiceName: audioParams.speaker1VoiceName || audioParams.voiceName || DEFAULT_AUDIO_PARAMS.voiceName
+                    },
+                    {
+                        speaker: (audioParams.speaker2Name || DEFAULT_AUDIO_PARAMS.speaker2Name).trim(),
+                        voiceName: audioParams.speaker2VoiceName || audioParams.voiceName || DEFAULT_AUDIO_PARAMS.speaker2VoiceName
+                    }
+                ];
+            } else {
+                ttsPayload.mode = 'single';
+                ttsPayload.voiceName = audioParams.voiceName || DEFAULT_AUDIO_PARAMS.voiceName;
+            }
+        } else {
+            ttsPayload.languageId = audioParams.languageId;
+            ttsPayload.voiceSample = audioParams.voiceSample;
+            ttsPayload.exaggeration = audioParams.exaggeration;
+            ttsPayload.cfg = audioParams.cfg;
+        }
+
         const payload = {
             model: selectedModel.value,
             prompt: ttsInput.value,
-            // We pass audio params under 'tts' object
-            tts: {
-                languageId: audioParams.languageId,
-                voiceSample: audioParams.voiceSample,
-                exaggeration: audioParams.exaggeration,
-                cfg: audioParams.cfg
-            },
+            tts: ttsPayload,
             stream: false // Audio is not streamed yet
         };
 
         const res = await axios.post('/run', payload);
         
         if (res.data.type === 'audio') {
+            const playbackUrl = res.data.audioUrl
+                || (res.data.audio?.data ? `data:${res.data.audio.mimeType || 'audio/wav'};base64,${res.data.audio.data}` : null);
+
+            if (!playbackUrl) {
+                throw new Error('Audio response does not include playable data');
+            }
+
             audioResults.value.unshift({
                 text: ttsInput.value,
                 audioUrl: res.data.audioUrl,
+                playbackUrl,
                 metadata: res.data.metadata
             });
         } else {
@@ -1429,3 +1616,4 @@ onMounted(init);
     right: 0;
 }
 </style>
+

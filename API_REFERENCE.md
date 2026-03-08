@@ -66,6 +66,7 @@
 | `topP` | number | No | Nucleus sampling (0.0 - 1.0). |
 | `maxTokens` | number | No | Максимальное количество токенов в ответе. |
 | `thinking` | object | No | **(New)** Настройки мышления (Reasoning). |
+| `tts` | object | No | **(New)** Настройки Text-to-Speech для моделей `type=audio` (Chatterbox / Gemini TTS). |
 | `image` | object | No | **(New)** Параметры генерации изображений. |
 | `video` | object | No | **(New)** Параметры генерации видео. |
 
@@ -108,6 +109,38 @@
 {
   "budget": number,      // Бюджет токенов на мышление (минимум 1024, если поддерживается)
   "includeThoughts": boolean // Возвращать ли процесс мышления в ответе
+}
+```
+
+#### TTS Object (New)
+Используется для моделей `type=audio`.
+
+Для Chatterbox:
+```json
+{
+  "languageId": "ru",
+  "voiceSample": "voice.wav",
+  "exaggeration": 0.5,
+  "cfg": 0.5
+}
+```
+
+Для Gemini TTS (single speaker):
+```json
+{
+  "mode": "single",
+  "voiceName": "Kore"
+}
+```
+
+Для Gemini TTS (multi speaker):
+```json
+{
+  "mode": "multi",
+  "speakers": [
+    { "speaker": "Joe", "voiceName": "Kore" },
+    { "speaker": "Jane", "voiceName": "Puck" }
+  ]
 }
 ```
 
@@ -204,6 +237,35 @@
 }
 ```
 
+#### Example Request (TTS, Gemini Single Speaker)
+```json
+{
+  "model": "gemini-2.5-flash-preview-tts",
+  "prompt": "Скажи бодро: Сегодня отличный день!",
+  "tts": {
+    "mode": "single",
+    "voiceName": "Kore"
+  },
+  "stream": false
+}
+```
+
+#### Example Request (TTS, Gemini Multi Speaker)
+```json
+{
+  "model": "gemini-2.5-flash-preview-tts",
+  "prompt": "Joe: Как дела? Jane: Отлично!",
+  "tts": {
+    "mode": "multi",
+    "speakers": [
+      { "speaker": "Joe", "voiceName": "Kore" },
+      { "speaker": "Jane", "voiceName": "Puck" }
+    ]
+  },
+  "stream": false
+}
+```
+
 #### Example Request (Video)
 ```json
 {
@@ -293,8 +355,27 @@ data: {"error": "Описание ошибки"}
 }
 ```
 
+#### Audio Response (JSON)
+```json
+{
+  "type": "audio",
+  "audioUrl": null,
+  "audio": {
+    "data": "<base64>",
+    "mimeType": "audio/wav"
+  },
+  "metadata": {
+    "mode": "gemini-tts",
+    "model": "gemini-2.5-flash-preview-tts",
+    "voice": "Kore",
+    "duration": 4.21
+  }
+}
+```
+
 ## Frontend Notes
 - В text-чате `Enter` отправляет сообщение.
 - `Shift + Enter` добавляет перенос строки без отправки.
 - Добавлена кнопка вложений (image/video/audio, множественный выбор до 10 файлов на запрос).
+- Для `type=audio` доступен выбор режима TTS: Chatterbox или Gemini TTS (single/multi speaker, выбор голосов).
 

@@ -28,6 +28,13 @@
     "type": "text"
   },
   {
+    "id": "gemini-3.1-flash-lite-preview",
+    "provider": "google",
+    "apiModelId": "gemini-3.1-flash-lite-preview",
+    "adapterMode": "openai",
+    "type": "text"
+  },
+  {
     "id": "gemini-3-pro-preview",
     "provider": "google",
     "apiModelId": "gemini-3-pro-preview",
@@ -131,6 +138,13 @@
     "provider": "groq",
     "apiModelId": "groq/compound",
     "type": "text"
+  },
+  {
+    "id": "gemini-2.5-flash-preview-tts",
+    "provider": "google",
+    "apiModelId": "gemini-2.5-flash-preview-tts",
+    "type": "audio",
+    "audioMode": "gemini-tts"
   },
   {
     "id": "chatterbox-local",
