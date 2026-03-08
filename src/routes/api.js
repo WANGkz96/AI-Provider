@@ -463,6 +463,9 @@ router.post('/run', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation Error', details: error.errors });
     }
+    if (error?.message === 'Media attachments are currently supported only for Gemini text models') {
+      return res.status(400).json({ error: error.message });
+    }
     console.error('Generation Error:', error);
     res.status(500).json({ error: error.message || 'Internal Server Error' });
   }

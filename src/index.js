@@ -12,7 +12,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '100mb';
+const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '300mb';
 
 // Middleware
 app.use(cors());
@@ -32,6 +32,13 @@ app.use((req, res) => {
 
 // Error Handling
 app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: 'Request body too large',
+      details: `Increase REQUEST_BODY_LIMIT if you need to send larger base64 media payloads. Current limit: ${requestBodyLimit}.`
+    });
+  }
+
   console.error(err.stack);
   res.status(500).send('Something broke!');
 });

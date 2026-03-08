@@ -51,7 +51,8 @@
 
 - **POST** `/run`
 - **Content-Type**: `application/json`
-- **Request size limit**: по умолчанию `100mb` (настраивается через `REQUEST_BODY_LIMIT`)
+- **Request size limit**: по умолчанию `300mb` (настраивается через `REQUEST_BODY_LIMIT`)
+- Для `media[].data` учитывайте overhead base64: файл `134 MB` превращается примерно в `179 MB` JSON payload.
 
 #### Parameters
 
