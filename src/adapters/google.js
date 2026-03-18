@@ -1,6 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleGenAI, PersonGeneration } from '@google/genai';
-import OpenAI from 'openai';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,37 +9,36 @@ export class GoogleAdapter extends BaseAdapter {
   constructor(config) {
     super(config);
     this.apiKey = config.googleApiKey || process.env.GEMINI_API_KEY;
+    this.useVertex = !!config.googleUseVertex;
+    this.project = config.googleCloudProject;
+    this.location = config.googleCloudLocation || 'global';
     this.httpTimeoutMs = config.googleHttpTimeoutMs || (20 * 60 * 1000);
     this.fileActiveTimeoutMs = config.googleFileActiveTimeoutMs || this.httpTimeoutMs;
     this.filePollIntervalMs = config.googleFilePollIntervalMs || 5000;
     this.maxRetries = config.googleMaxRetries ?? 0;
     
-    if (!this.apiKey) {
-      console.warn('Google Adapter initialized without API Key');
+    if (!this.apiKey && !this.useVertex) {
+      console.warn('Google Adapter initialized without API Key and without Vertex AI enabled');
     }
 
-    // Native SDK for standard models (like Gemma)
-    this.genAI = new GoogleGenerativeAI(this.apiKey);
-    this.imageAI = this.apiKey
-      ? new GoogleGenAI({
-          apiKey: this.apiKey,
-          maxRetries: this.maxRetries,
-          httpOptions: {
-            timeout: this.httpTimeoutMs
+    this.genAI = new GoogleGenAI({
+      ...(this.useVertex
+        ? {
+            vertexai: true,
+            project: this.project,
+            location: this.location
           }
-        })
-      : null;
-    
-    // OpenAI Client for newer models or models requiring the OpenAI-compatible endpoint
-    this.openai = new OpenAI({
-      apiKey: this.apiKey,
-      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-      timeout: this.httpTimeoutMs,
+        : {
+            apiKey: this.apiKey
+          }),
       maxRetries: this.maxRetries,
-      defaultHeaders: {
-        'x-goog-api-key': this.apiKey 
+      httpOptions: {
+        timeout: this.httpTimeoutMs
       }
     });
+
+    // Provide alias for compatibility in other methods
+    this.imageAI = this.genAI;
   }
 
   async health() {
@@ -74,15 +71,7 @@ export class GoogleAdapter extends BaseAdapter {
       return this.generateMultimodalViaGemini({ ...params, model: targetModel });
     }
 
-    // Use mode from config ('native' vs 'openai'). Default to native if not specified.
-    // But if 'thinking' is used, we force OpenAI as per previous requirement.
-    const useOpenAI = adapterMode === 'openai' || options?.thinking;
-
-    if (useOpenAI) {
-        return this.generateViaOpenAI({ ...params, model: targetModel });
-    } else {
-      return this.generateViaNativeSDK({ ...params, model: targetModel });
-    }
+    return this.generateViaGenAI({ ...params, model: targetModel });
   }
 
   async generateMultimodalViaGemini({ model, prompt, messages, media, stream, options }) {
@@ -390,41 +379,54 @@ export class GoogleAdapter extends BaseAdapter {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  // --- Implementation 1: Native Google SDK ---
-  async generateViaNativeSDK({ model, prompt, messages, stream, options }) {
-    console.log(`[GoogleAdapter:Native] Requesting model: ${model}`);
+  async generateViaGenAI({ model, prompt, messages, stream, options }) {
+    console.log(`[GoogleAdapter:GenAI] Requesting model: ${model}`);
 
     const inputMessages = this.normalizeMessages({ prompt, messages });
 
-    const modelParams = {
-      model: model,
-      generationConfig: {
-        topP: options?.topP,
-        maxOutputTokens: options?.maxTokens,
-        temperature: options?.temperature,
-        responseMimeType: options?.responseMimeType,
-        responseSchema: options?.responseSchema
-      }
-    };
-
-    const genModel = this.genAI.getGenerativeModel(modelParams);
-
-    const history = inputMessages.slice(0, -1).map(m => ({
-      role: m.role === 'user' ? 'user' : 'model',
-      parts: [{ text: m.content }]
+    const contents = inputMessages.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [
+        {
+          text: m.role === 'system' ? `[SYSTEM]\n${m.content}` : m.content
+        }
+      ]
     }));
 
-    const lastMessage = inputMessages[inputMessages.length - 1].content;
+    const config = {
+      temperature: options?.thinking ? undefined : options?.temperature,
+      topP: options?.topP,
+      maxOutputTokens: options?.maxTokens,
+      responseMimeType: options?.responseMimeType,
+      responseSchema: options?.responseSchema,
+      ...(options?.thinking ? {
+        thinkingConfig: {
+          includeThoughts: options.thinking.includeThoughts,
+          thinkingBudget: options.thinking.budget
+        }
+      } : {})
+    };
 
-    const chat = genModel.startChat({ history });
+    const request = {
+      model,
+      contents,
+      config: this.removeUndefined(config)
+    };
 
     if (stream) {
-      const result = await chat.sendMessageStream(lastMessage);
-      return result.stream; 
-    } else {
-      const result = await chat.sendMessage(lastMessage);
-      return this.formatNativeResponse(result.response);
+      const responseStream = await this.genAI.models.generateContentStream(request);
+      return this.transformGeminiContentStream(responseStream);
     }
+
+    const response = await this.genAI.models.generateContent(request);
+    
+    const formatted = this.formatGeminiContentResponse(response);
+    formatted.metadata = {
+      ...formatted.metadata,
+      mode: 'genai',
+      model
+    };
+    return formatted;
   }
 
   // --- Implementation 2: OpenAI-Compatible Endpoint ---
@@ -500,49 +502,7 @@ export class GoogleAdapter extends BaseAdapter {
     throw new Error('No prompt/messages provided for text generation');
   }
 
-  extractOpenAIContent(message) {
-    if (!message) return '';
-
-    if (typeof message.content === 'string') {
-      return message.content;
-    }
-
-    if (Array.isArray(message.content)) {
-      return message.content
-        .map((part) => {
-          if (typeof part === 'string') return part;
-          if (typeof part?.text === 'string') return part.text;
-          return '';
-        })
-        .join('');
-    }
-
-    if (typeof message.refusal === 'string') {
-      return message.refusal;
-    }
-
-    return '';
-  }
-
-  mapOpenAIUsage(usage) {
-    if (!usage) return null;
-
-    return {
-      inputTokens: usage.prompt_tokens ?? null,
-      outputTokens: usage.completion_tokens ?? null,
-      totalTokens: usage.total_tokens ?? null,
-      raw: usage
-    };
-  }
-
-  formatNativeResponse(response) {
-    return {
-      content: response?.text?.() ?? '',
-      finishReason: response?.candidates?.[0]?.finishReason ?? null,
-      usage: this.mapNativeUsage(response?.usageMetadata),
-      blockedReason: response?.promptFeedback?.blockReason ?? null
-    };
-  }
+  // Unused methods removed
 
   mapNativeUsage(usageMetadata) {
     if (!usageMetadata) return null;

@@ -73,6 +73,11 @@ export const saveConfiguredModels = (models) => {
 export const config = {
   port: process.env.PORT || 3000,
   googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
+  googleUseVertex: /^(1|true|yes)$/i.test(
+    process.env.GOOGLE_GENAI_USE_VERTEXAI || process.env.GOOGLE_USE_VERTEX || ''
+  ),
+  googleCloudProject: process.env.GOOGLE_CLOUD_PROJECT,
+  googleCloudLocation: process.env.GOOGLE_CLOUD_LOCATION || 'global',
   googleHttpTimeoutMs: parsePositiveIntEnv('GOOGLE_HTTP_TIMEOUT_MS', 20 * 60 * 1000),
   googleFileActiveTimeoutMs: parsePositiveIntEnv('GOOGLE_FILE_ACTIVE_TIMEOUT_MS', 20 * 60 * 1000),
   googleFilePollIntervalMs: parsePositiveIntEnv('GOOGLE_FILE_POLL_INTERVAL_MS', 5000),
