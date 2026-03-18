@@ -10,6 +10,36 @@ const __filename = fileURLToPath(import.meta.url);
 const PROJECT_ROOT = path.resolve(path.dirname(__filename), '../../');
 const CONFIG_PATH = path.join(PROJECT_ROOT, 'models.json');
 
+const parsePositiveIntEnv = (name, fallback) => {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue === '') {
+    return fallback;
+  }
+
+  const parsedValue = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    console.warn(`Invalid ${name}='${rawValue}', using ${fallback}`);
+    return fallback;
+  }
+
+  return parsedValue;
+};
+
+const parseNonNegativeIntEnv = (name, fallback) => {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue === '') {
+    return fallback;
+  }
+
+  const parsedValue = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+    console.warn(`Invalid ${name}='${rawValue}', using ${fallback}`);
+    return fallback;
+  }
+
+  return parsedValue;
+};
+
 /**
  * Reads configured models from models.json
  */
@@ -43,6 +73,12 @@ export const saveConfiguredModels = (models) => {
 export const config = {
   port: process.env.PORT || 3000,
   googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
+  googleHttpTimeoutMs: parsePositiveIntEnv('GOOGLE_HTTP_TIMEOUT_MS', 20 * 60 * 1000),
+  googleFileActiveTimeoutMs: parsePositiveIntEnv('GOOGLE_FILE_ACTIVE_TIMEOUT_MS', 20 * 60 * 1000),
+  googleFilePollIntervalMs: parsePositiveIntEnv('GOOGLE_FILE_POLL_INTERVAL_MS', 5000),
+  googleMaxRetries: parseNonNegativeIntEnv('GOOGLE_MAX_RETRIES', 0),
   groqApiKey: process.env.GROQ_API_KEY,
-  dockerHost: process.env.DOCKER_HOST_URL || 'http://localhost'
+  dockerHost: process.env.DOCKER_HOST_URL || 'http://localhost',
+  serverRequestTimeoutMs: parsePositiveIntEnv('SERVER_REQUEST_TIMEOUT_MS', 20 * 60 * 1000),
+  serverHeadersTimeoutMs: parsePositiveIntEnv('SERVER_HEADERS_TIMEOUT_MS', 21 * 60 * 1000)
 };

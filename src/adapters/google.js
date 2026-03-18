@@ -11,6 +11,10 @@ export class GoogleAdapter extends BaseAdapter {
   constructor(config) {
     super(config);
     this.apiKey = config.googleApiKey || process.env.GEMINI_API_KEY;
+    this.httpTimeoutMs = config.googleHttpTimeoutMs || (20 * 60 * 1000);
+    this.fileActiveTimeoutMs = config.googleFileActiveTimeoutMs || this.httpTimeoutMs;
+    this.filePollIntervalMs = config.googleFilePollIntervalMs || 5000;
+    this.maxRetries = config.googleMaxRetries ?? 0;
     
     if (!this.apiKey) {
       console.warn('Google Adapter initialized without API Key');
@@ -18,12 +22,22 @@ export class GoogleAdapter extends BaseAdapter {
 
     // Native SDK for standard models (like Gemma)
     this.genAI = new GoogleGenerativeAI(this.apiKey);
-    this.imageAI = this.apiKey ? new GoogleGenAI({ apiKey: this.apiKey }) : null;
+    this.imageAI = this.apiKey
+      ? new GoogleGenAI({
+          apiKey: this.apiKey,
+          maxRetries: this.maxRetries,
+          httpOptions: {
+            timeout: this.httpTimeoutMs
+          }
+        })
+      : null;
     
     // OpenAI Client for newer models or models requiring the OpenAI-compatible endpoint
     this.openai = new OpenAI({
       apiKey: this.apiKey,
       baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      timeout: this.httpTimeoutMs,
+      maxRetries: this.maxRetries,
       defaultHeaders: {
         'x-goog-api-key': this.apiKey 
       }
@@ -217,8 +231,9 @@ export class GoogleAdapter extends BaseAdapter {
   async uploadFileAndWaitActive({ mimeType, data, mediaType }) {
     const extension = this.mimeTypeToExtension(mimeType);
     const tempPath = path.join(os.tmpdir(), `gemini-upload-${randomUUID()}.${extension}`);
-    const pollIntervalMs = 5000;
-    const maxPolls = 72;
+    const pollIntervalMs = this.filePollIntervalMs;
+    const maxWaitMs = Math.max(this.fileActiveTimeoutMs, pollIntervalMs);
+    const maxPolls = Math.max(1, Math.ceil(maxWaitMs / pollIntervalMs));
 
     await fs.writeFile(tempPath, Buffer.from(data, 'base64'));
 
@@ -237,7 +252,7 @@ export class GoogleAdapter extends BaseAdapter {
         }
 
         if (polls >= maxPolls) {
-          throw new Error(`${mediaType || 'Media'} processing timed out while waiting for ACTIVE state`);
+          throw new Error(`${mediaType || 'Media'} processing timed out while waiting for ACTIVE state after ${Math.ceil(maxWaitMs / 1000)}s`);
         }
 
         polls += 1;

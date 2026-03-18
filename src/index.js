@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import apiRoutes from './routes/api.js';
+import { config } from './config/models.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -11,8 +12,10 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.port || process.env.PORT || 3000;
 const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '300mb';
+const serverRequestTimeoutMs = config.serverRequestTimeoutMs;
+const serverHeadersTimeoutMs = Math.max(config.serverHeadersTimeoutMs, serverRequestTimeoutMs + 1000);
 
 // Middleware
 app.use(cors());
@@ -44,7 +47,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start Server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
   🚀 AI Provider Server running on http://localhost:${PORT}
   
@@ -52,8 +55,15 @@ app.listen(PORT, () => {
   - GET /health
   - GET /available-models
   - POST /run
+
+  Server timeouts:
+  - requestTimeout: ${serverRequestTimeoutMs}ms
+  - headersTimeout: ${serverHeadersTimeoutMs}ms
   
   Check .env for configuration.
   `);
 });
+
+server.requestTimeout = serverRequestTimeoutMs;
+server.headersTimeout = serverHeadersTimeoutMs;
 
