@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { BaseAdapter } from './base.js';
+import { Storage } from '@google-cloud/storage';
 
 export class GoogleAdapter extends BaseAdapter {
   constructor(config) {
@@ -12,6 +13,7 @@ export class GoogleAdapter extends BaseAdapter {
     this.useVertex = !!config.googleUseVertex;
     this.project = config.googleCloudProject;
     this.location = config.googleCloudLocation || 'global';
+    this.storageBucket = config.googleCloudStorageBucket;
     this.httpTimeoutMs = config.googleHttpTimeoutMs || (20 * 60 * 1000);
     this.fileActiveTimeoutMs = config.googleFileActiveTimeoutMs || this.httpTimeoutMs;
     this.filePollIntervalMs = config.googleFilePollIntervalMs || 5000;
@@ -36,6 +38,10 @@ export class GoogleAdapter extends BaseAdapter {
         timeout: this.httpTimeoutMs
       }
     });
+
+    if (this.useVertex && this.storageBucket) {
+      this.gcs = new Storage({ projectId: this.project });
+    }
 
     // Provide alias for compatibility in other methods
     this.imageAI = this.genAI;
@@ -227,6 +233,26 @@ export class GoogleAdapter extends BaseAdapter {
     await fs.writeFile(tempPath, Buffer.from(data, 'base64'));
 
     try {
+      if (this.useVertex) {
+        if (!this.storageBucket || !this.gcs) {
+          throw new Error('Vertex AI requires a GCS bucket for media uploads. Set GOOGLE_CLOUD_STORAGE_BUCKET in .env');
+        }
+
+        const bucket = this.gcs.bucket(this.storageBucket);
+        const gcsFileName = `ai-provider-uploads/${randomUUID()}.${extension}`;
+        
+        await bucket.upload(tempPath, {
+          destination: gcsFileName,
+          metadata: { contentType: mimeType }
+        });
+
+        // Vertex AI expects the GCS URI directly. It does not need state polling.
+        return {
+          uri: `gs://${this.storageBucket}/${gcsFileName}`,
+          mimeType
+        };
+      }
+
       let file = await this.imageAI.files.upload({
         file: tempPath,
         config: { mimeType }

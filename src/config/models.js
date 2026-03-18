@@ -78,6 +78,7 @@ export const config = {
   ),
   googleCloudProject: process.env.GOOGLE_CLOUD_PROJECT,
   googleCloudLocation: process.env.GOOGLE_CLOUD_LOCATION || 'global',
+  googleCloudStorageBucket: process.env.GOOGLE_CLOUD_STORAGE_BUCKET,
   googleHttpTimeoutMs: parsePositiveIntEnv('GOOGLE_HTTP_TIMEOUT_MS', 20 * 60 * 1000),
   googleFileActiveTimeoutMs: parsePositiveIntEnv('GOOGLE_FILE_ACTIVE_TIMEOUT_MS', 20 * 60 * 1000),
   googleFilePollIntervalMs: parsePositiveIntEnv('GOOGLE_FILE_POLL_INTERVAL_MS', 5000),
