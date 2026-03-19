@@ -543,7 +543,12 @@ export class GoogleAdapter extends BaseAdapter {
 
   async generateGeminiTtsAudio({ model, prompt, messages, options }) {
     if (!this.imageAI) {
-      throw new Error('Gemini TTS requires a valid API key');
+      throw new Error('Gemini TTS requires a valid API key or Vertex AI config');
+    }
+
+    let targetModel = model;
+    if (this.useVertex && targetModel.includes('-preview-tts')) {
+      targetModel = targetModel.replace('-preview-tts', '-tts');
     }
 
     const promptText = prompt || messages?.[messages.length - 1]?.content;
@@ -585,7 +590,7 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     const response = await this.imageAI.models.generateContent({
-      model,
+      model: targetModel,
       contents: [
         {
           role: 'user',
