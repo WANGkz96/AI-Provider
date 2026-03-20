@@ -59,7 +59,12 @@ export class GoogleAdapter extends BaseAdapter {
     const { model, apiModelId, options, adapterMode, type, media } = params;
 
     // Use apiModelId from config if available, fallback to 'model' ID
-    const targetModel = apiModelId || model;
+    let targetModel = apiModelId || model;
+
+    // Vertex AI endpoints fail if the model ID keeps the AI Studio's 'models/' prefix
+    if (this.useVertex && targetModel.startsWith('models/')) {
+      targetModel = targetModel.replace('models/', '');
+    }
 
     if (type === 'image') {
       return this.generateImage({ ...params, model: targetModel });
