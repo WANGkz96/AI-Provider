@@ -827,6 +827,11 @@ export class GoogleAdapter extends BaseAdapter {
       throw new Error('Google video generation requires a valid API key');
     }
 
+    let targetModel = model;
+    if (this.useVertex && targetModel.includes('-preview')) {
+      targetModel = targetModel.replace('-preview', '-001');
+    }
+
     const promptText = prompt || messages?.[messages.length - 1]?.content;
     if (!promptText) {
       throw new Error('No prompt provided for video generation');
@@ -841,7 +846,7 @@ export class GoogleAdapter extends BaseAdapter {
     };
 
     let operation = await this.imageAI.models.generateVideos({
-      model,
+      model: targetModel,
       prompt: promptText,
       config
     });
@@ -861,14 +866,26 @@ export class GoogleAdapter extends BaseAdapter {
       });
     }
 
+    if (operation.error) {
+      throw new Error(`Video generation failed: ${operation.error.message || JSON.stringify(operation.error)}`);
+    }
+
     const generatedVideos = operation.response?.generatedVideos || [];
     const videos = [];
 
     for (const generatedVideo of generatedVideos) {
+      if (generatedVideo?.video?.videoBytes) {
+        videos.push({
+          data: generatedVideo.video.videoBytes,
+          mimeType: generatedVideo?.video?.mimeType || 'video/mp4'
+        });
+        continue;
+      }
+
       const uri = generatedVideo?.video?.uri;
       if (!uri) continue;
 
-      const downloadUrl = this.appendApiKey(uri);
+      const downloadUrl = this.useVertex ? uri : this.appendApiKey(uri);
       const response = await fetch(downloadUrl);
       if (!response.ok) {
         throw new Error(`Failed to download generated video: ${response.statusText}`);
@@ -890,7 +907,7 @@ export class GoogleAdapter extends BaseAdapter {
       videos,
       metadata: {
         mode: videoMode || 'veo',
-        model,
+        model: targetModel,
         count: videos.length,
         durationSeconds: config.durationSeconds,
         resolution: config.resolution,
