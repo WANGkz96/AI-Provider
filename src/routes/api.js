@@ -24,12 +24,19 @@ const toolCallSchema = z.object({
   arguments: z.any().optional()
 });
 
+const providerStateSchema = z.object({
+  role: z.string().optional(),
+  parts: z.array(z.any()).optional()
+}).passthrough();
+
 const messageSchema = z.object({
   role: z.enum(['user', 'assistant', 'system', 'tool']),
   content: z.string().nullable().optional(),
   tool_calls: z.array(toolCallSchema).max(128).optional(),
   tool_call_id: z.string().min(1).optional(),
-  name: z.string().min(1).optional()
+  name: z.string().min(1).optional(),
+  parts: z.array(z.any()).optional(),
+  provider_state: providerStateSchema.optional()
 }).superRefine((message, ctx) => {
   if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
     return;
@@ -160,6 +167,8 @@ function normalizeTextResponse(response) {
       outputText: response,
       parsedOutput: null,
       toolCalls: [],
+      parts: [],
+      providerState: null,
       messageRole: 'assistant',
       finishReason: null,
       usage: null,
@@ -175,12 +184,29 @@ function normalizeTextResponse(response) {
     const toolCalls = Array.isArray(response.toolCalls)
       ? response.toolCalls
       : (Array.isArray(response.message?.toolCalls) ? response.message.toolCalls : []);
+    const parts = Array.isArray(response.parts)
+      ? response.parts
+      : (Array.isArray(response.message?.parts)
+        ? response.message.parts
+        : (Array.isArray(response.providerState?.parts)
+          ? response.providerState.parts
+          : (Array.isArray(response.message?.providerState?.parts)
+            ? response.message.providerState.parts
+            : (Array.isArray(response.message?.provider_state?.parts)
+              ? response.message.provider_state.parts
+              : []))));
+    const providerState = response.providerState
+      ?? response.message?.providerState
+      ?? response.message?.provider_state
+      ?? (parts.length > 0 ? { parts } : null);
 
     return {
       content,
       outputText: normalizeContentText(response.outputText ?? content),
       parsedOutput: response.parsedOutput ?? null,
       toolCalls,
+      parts,
+      providerState,
       messageRole: response.message?.role ?? 'assistant',
       finishReason: response.finishReason ?? null,
       usage: response.usage ?? null,
@@ -194,6 +220,8 @@ function normalizeTextResponse(response) {
     outputText: '',
     parsedOutput: null,
     toolCalls: [],
+    parts: [],
+    providerState: null,
     messageRole: 'assistant',
     finishReason: null,
     usage: null,
@@ -523,6 +551,7 @@ router.post('/run', async (req, res) => {
           const finishReason = normalized.finishReason;
           const truncated = isTruncatedFinishReason(finishReason);
           const toolCalls = Array.isArray(normalized.toolCalls) ? normalized.toolCalls : [];
+          const rawParts = Array.isArray(normalized.parts) ? normalized.parts : [];
           let content = normalized.content;
           let outputText = normalized.outputText || content;
           let parsedOutput = normalized.parsedOutput;
@@ -563,10 +592,13 @@ router.post('/run', async (req, res) => {
             message: {
               role: normalized.messageRole,
               content,
-              tool_calls: toolCalls
+              tool_calls: toolCalls,
+              parts: rawParts,
+              provider_state: normalized.providerState ?? null
             },
             output_text: outputText,
             parsed_output: parsedOutput ?? null,
+            provider_state: normalized.providerState ?? null,
             finishReason,
             usage: normalized.usage,
             blockedReason: normalized.blockedReason,

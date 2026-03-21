@@ -198,7 +198,13 @@ export class GoogleAdapter extends BaseAdapter {
       return null;
     }
 
+    const preservedParts = this.extractIncomingParts(message);
+
     if (message.role === 'user') {
+      if (preservedParts.length > 0 && index !== mediaMessageIndex) {
+        return { role: 'user', parts: preservedParts };
+      }
+
       const parts = [];
 
       if (index === mediaMessageIndex) {
@@ -217,11 +223,19 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     if (message.role === 'assistant') {
+      if (preservedParts.length > 0) {
+        this.registerToolNamesFromParts(toolNameById, preservedParts);
+        return {
+          role: this.normalizeContentRole(message.provider_state?.role, 'model'),
+          parts: preservedParts
+        };
+      }
+
       const parts = [];
       const assistantText = this.normalizeText(message.content);
 
       if (assistantText) {
-        parts.push({ text: assistantText });
+          parts.push({ text: assistantText });
       }
 
       for (const toolCall of this.normalizeAssistantToolCalls(message.tool_calls)) {
@@ -244,6 +258,13 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     if (message.role === 'tool') {
+      if (preservedParts.length > 0) {
+        return {
+          role: 'user',
+          parts: preservedParts
+        };
+      }
+
       const toolName = message.name || (message.tool_call_id ? toolNameById.get(message.tool_call_id) : undefined);
 
       if (!toolName) {
@@ -280,6 +301,44 @@ export class GoogleAdapter extends BaseAdapter {
         }
       ]
     };
+  }
+
+  extractIncomingParts(message) {
+    const parts = Array.isArray(message?.provider_state?.parts)
+      ? message.provider_state.parts
+      : (Array.isArray(message?.parts) ? message.parts : []);
+
+    return this.cloneParts(parts);
+  }
+
+  cloneParts(parts) {
+    if (!Array.isArray(parts) || parts.length === 0) {
+      return [];
+    }
+
+    return JSON.parse(JSON.stringify(parts));
+  }
+
+  registerToolNamesFromParts(toolNameById, parts) {
+    for (const part of parts || []) {
+      const id = this.normalizeText(part?.functionCall?.id).trim();
+      const name = this.normalizeText(part?.functionCall?.name).trim();
+
+      if (id && name) {
+        toolNameById.set(id, name);
+      }
+    }
+  }
+
+  normalizeContentRole(role, fallback = 'user') {
+    const normalized = this.normalizeText(role).trim().toLowerCase();
+    if (normalized === 'model' || normalized === 'assistant') {
+      return 'model';
+    }
+    if (normalized === 'user' || normalized === 'tool') {
+      return 'user';
+    }
+    return fallback;
   }
 
   async buildGeminiMediaParts(media) {
@@ -425,6 +484,14 @@ export class GoogleAdapter extends BaseAdapter {
   formatGeminiContentResponse(response, { responseMimeType } = {}) {
     const content = this.extractGeminiText(response);
     const toolCalls = this.mapGeminiFunctionCalls(response?.functionCalls);
+    const candidateContent = response?.candidates?.[0]?.content;
+    const parts = this.cloneParts(candidateContent?.parts);
+    const providerState = parts.length > 0
+      ? {
+          role: candidateContent?.role ?? 'model',
+          parts
+        }
+      : null;
     const parsedOutput = responseMimeType === 'application/json' && toolCalls.length === 0
       ? this.tryParseJsonContent(content)
       : null;
@@ -434,10 +501,14 @@ export class GoogleAdapter extends BaseAdapter {
       outputText: content,
       parsedOutput,
       toolCalls,
+      parts,
+      providerState,
       message: {
         role: 'assistant',
         content,
-        toolCalls
+        toolCalls,
+        parts,
+        providerState
       },
       finishReason: response?.candidates?.[0]?.finishReason ?? null,
       usage: this.mapNativeUsage(response?.usageMetadata),

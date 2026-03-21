@@ -137,6 +137,31 @@ Text responses keep the legacy fields and also include agent-friendly fields:
   "message": {
     "role": "assistant",
     "content": "",
+    "parts": [
+      {
+        "functionCall": {
+          "name": "ConductResearch",
+          "args": {
+            "research_topic": "..."
+          }
+        },
+        "thoughtSignature": "<opaque>"
+      }
+    ],
+    "provider_state": {
+      "role": "model",
+      "parts": [
+        {
+          "functionCall": {
+            "name": "ConductResearch",
+            "args": {
+              "research_topic": "..."
+            }
+          },
+          "thoughtSignature": "<opaque>"
+        }
+      ]
+    },
     "tool_calls": [
       {
         "id": "call_1",
@@ -155,6 +180,7 @@ Text responses keep the legacy fields and also include agent-friendly fields:
 Notes:
 - All new fields are optional.
 - Existing requests with `maxTokens`, plain `messages`, `prompt`, and legacy `responseMimeType` / `responseSchema` continue to work.
+- For Gemini 3 multi-step tool calling, send `message.parts` or `message.provider_state.parts` back exactly as received from the previous assistant response so thought signatures are preserved.
 - `stream: false` is required when using `output`, `tools`, `tool_choice`, assistant `tool_calls`, or `tool` messages.
 
 #### Media Object (New)
