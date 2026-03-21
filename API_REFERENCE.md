@@ -79,6 +79,84 @@
 }
 ```
 
+#### Advanced Agent Fields
+For Deep Research and other agent-style clients, `/run` also supports optional OpenAI-like fields for structured output and tool calling.
+
+Request additions:
+
+```json
+{
+  "max_tokens": 8192,
+  "output": {
+    "type": "json_schema",
+    "name": "Summary",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "key_excerpts": { "type": "string" }
+      },
+      "required": ["summary", "key_excerpts"]
+    }
+  },
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "ConductResearch",
+        "description": "Call this tool to conduct research on a specific topic.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "research_topic": { "type": "string" }
+          },
+          "required": ["research_topic"]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto"
+}
+```
+
+Supported text message roles:
+
+```json
+{ "role": "system", "content": "..." }
+{ "role": "user", "content": "..." }
+{ "role": "assistant", "content": "", "tool_calls": [{ "id": "call_1", "name": "ConductResearch", "arguments": { "research_topic": "..." } }] }
+{ "role": "tool", "tool_call_id": "call_1", "content": "{\"result\":\"...\"}" }
+```
+
+Text responses keep the legacy fields and also include agent-friendly fields:
+
+```json
+{
+  "type": "text",
+  "content": "",
+  "message": {
+    "role": "assistant",
+    "content": "",
+    "tool_calls": [
+      {
+        "id": "call_1",
+        "name": "ConductResearch",
+        "arguments": {
+          "research_topic": "..."
+        }
+      }
+    ]
+  },
+  "output_text": "",
+  "parsed_output": null
+}
+```
+
+Notes:
+- All new fields are optional.
+- Existing requests with `maxTokens`, plain `messages`, `prompt`, and legacy `responseMimeType` / `responseSchema` continue to work.
+- `stream: false` is required when using `output`, `tools`, `tool_choice`, assistant `tool_calls`, or `tool` messages.
+
 #### Media Object (New)
 Единый формат вложений для `/run`. Передаётся как массив `media`.
 

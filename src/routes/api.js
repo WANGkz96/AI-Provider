@@ -18,6 +18,64 @@ const GEMINI_TTS_VOICE_NAMES = [
   'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'
 ];
 
+const toolCallSchema = z.object({
+  id: z.string().min(1).optional(),
+  name: z.string().min(1),
+  arguments: z.any().optional()
+});
+
+const messageSchema = z.object({
+  role: z.enum(['user', 'assistant', 'system', 'tool']),
+  content: z.string().nullable().optional(),
+  tool_calls: z.array(toolCallSchema).max(128).optional(),
+  tool_call_id: z.string().min(1).optional(),
+  name: z.string().min(1).optional()
+}).superRefine((message, ctx) => {
+  if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+    return;
+  }
+
+  if (message.role === 'tool' && !message.tool_call_id && !message.name) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Tool messages must include tool_call_id or name'
+    });
+  }
+});
+
+const outputSchema = z.object({
+  type: z.enum(['text', 'json_schema']),
+  name: z.string().min(1).optional(),
+  schema: z.any().optional()
+}).superRefine((output, ctx) => {
+  if (output.type === 'json_schema' && output.schema === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'output.schema is required when output.type is json_schema'
+    });
+  }
+});
+
+const toolSchema = z.object({
+  type: z.literal('function'),
+  function: z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    parameters: z.any().optional()
+  })
+});
+
+const toolChoiceSchema = z.union([
+  z.enum(['auto', 'required', 'none', 'validated']),
+  z.string().min(1),
+  z.object({
+    type: z.literal('function'),
+    function: z.object({
+      name: z.string().min(1)
+    })
+  })
+]);
+
 // Initialize Providers
 const providers = {
   google: new GoogleAdapter(config),
@@ -34,10 +92,7 @@ const runSchema = z.object({
   model: z.string(),
   // Messages are required for Chat, but strictly speaking TTS might just need a prompt
   // We'll treat the last message content as the prompt for TTS if provided
-  messages: z.array(z.object({
-    role: z.enum(['user', 'assistant', 'system']),
-    content: z.string()
-  })).optional(),
+  messages: z.array(messageSchema).optional(),
   prompt: z.string().optional(), // Direct prompt support
   media: z.array(z.object({
     type: z.enum(['image', 'video', 'audio']).optional(),
@@ -55,6 +110,7 @@ const runSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   topP: z.number().min(0).max(1).optional(),
   maxTokens: z.number().optional(),
+  max_tokens: z.number().optional(),
   thinking: z.object({
     budget: z.number().min(1024),
     includeThoughts: z.boolean().default(false)
@@ -62,6 +118,9 @@ const runSchema = z.object({
   responseMimeType: z.enum(['text/plain', 'application/json']).optional(),
   responseSchema: z.record(z.string(), z.any()).optional(),
   strictJson: z.boolean().optional(),
+  output: outputSchema.optional(),
+  tools: z.array(toolSchema).max(128).optional(),
+  tool_choice: toolChoiceSchema.optional(),
   
   // Audio / TTS specific params
   tts: z.object({
@@ -98,6 +157,10 @@ function normalizeTextResponse(response) {
   if (typeof response === 'string') {
     return {
       content: response,
+      outputText: response,
+      parsedOutput: null,
+      toolCalls: [],
+      messageRole: 'assistant',
       finishReason: null,
       usage: null,
       blockedReason: null,
@@ -106,8 +169,19 @@ function normalizeTextResponse(response) {
   }
 
   if (response && typeof response === 'object') {
+    const content = normalizeContentText(
+      response.content ?? response.outputText ?? response.message?.content
+    );
+    const toolCalls = Array.isArray(response.toolCalls)
+      ? response.toolCalls
+      : (Array.isArray(response.message?.toolCalls) ? response.message.toolCalls : []);
+
     return {
-      content: normalizeContentText(response.content),
+      content,
+      outputText: normalizeContentText(response.outputText ?? content),
+      parsedOutput: response.parsedOutput ?? null,
+      toolCalls,
+      messageRole: response.message?.role ?? 'assistant',
       finishReason: response.finishReason ?? null,
       usage: response.usage ?? null,
       blockedReason: response.blockedReason ?? null,
@@ -117,6 +191,10 @@ function normalizeTextResponse(response) {
 
   return {
     content: '',
+    outputText: '',
+    parsedOutput: null,
+    toolCalls: [],
+    messageRole: 'assistant',
     finishReason: null,
     usage: null,
     blockedReason: null,
@@ -160,6 +238,17 @@ function isTruncatedFinishReason(finishReason) {
   if (!finishReason) return false;
   const normalized = String(finishReason).toLowerCase();
   return normalized === 'length' || normalized === 'max_tokens' || normalized === 'max_output_tokens';
+}
+
+function usesAdvancedTextContract(body) {
+  if (body.output || body.tools || body.tool_choice !== undefined) {
+    return true;
+  }
+
+  return Array.isArray(body.messages) && body.messages.some((message) => (
+    message.role === 'tool' ||
+    (message.role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
+  ));
 }
 
 // --- Routes ---
@@ -289,7 +378,18 @@ router.get('/audio-proxy', (req, res) => {
 router.post('/run', async (req, res) => {
   try {
     const body = runSchema.parse(req.body);
-    
+    const resolvedMaxTokens = body.maxTokens ?? body.max_tokens;
+    const resolvedResponseMimeType = body.output?.type === 'json_schema'
+      ? 'application/json'
+      : (body.output?.type === 'text' ? 'text/plain' : body.responseMimeType);
+    const resolvedResponseSchema = body.output?.type === 'json_schema'
+      ? undefined
+      : body.responseSchema;
+    const resolvedResponseJsonSchema = body.output?.type === 'json_schema'
+      ? body.output.schema
+      : undefined;
+    const resolvedStrictJson = body.strictJson ?? (body.output?.type === 'json_schema' ? true : undefined);
+
     const models = getConfiguredModels();
     const targetModel = models.find(m => m.id === body.model);
 
@@ -300,6 +400,12 @@ router.post('/run', async (req, res) => {
     const provider = providers[targetModel.provider];
     if (!provider) {
       return res.status(500).json({ error: `Provider '${targetModel.provider}' not initialized.` });
+    }
+
+    if (body.stream && usesAdvancedTextContract(body)) {
+      return res.status(400).json({
+        error: 'Streaming is currently not supported when using output schemas or tool calling'
+      });
     }
 
     // Unified Generation Params
@@ -323,11 +429,15 @@ router.post('/run', async (req, res) => {
         options: {
             temperature: body.temperature,
             topP: body.topP,
-            maxTokens: body.maxTokens,
+            maxTokens: resolvedMaxTokens,
             thinking: body.thinking,
-            responseMimeType: body.responseMimeType,
-            responseSchema: body.responseSchema,
-            strictJson: body.strictJson,
+            responseMimeType: resolvedResponseMimeType,
+            responseSchema: resolvedResponseSchema,
+            responseJsonSchema: resolvedResponseJsonSchema,
+            outputName: body.output?.name,
+            strictJson: resolvedStrictJson,
+            tools: body.tools,
+            toolChoice: body.tool_choice,
             
             // Audio Params
             languageId: body.tts?.languageId,
@@ -408,14 +518,18 @@ router.post('/run', async (req, res) => {
       } else {
           // Text response
           const normalized = normalizeTextResponse(response);
-          const expectsJson = body.responseMimeType === 'application/json';
-          const strictJson = expectsJson ? (body.strictJson ?? true) : (body.strictJson ?? false);
+          const expectsJson = resolvedResponseMimeType === 'application/json';
+          const strictJson = expectsJson ? (resolvedStrictJson ?? true) : (resolvedStrictJson ?? false);
           const finishReason = normalized.finishReason;
           const truncated = isTruncatedFinishReason(finishReason);
+          const toolCalls = Array.isArray(normalized.toolCalls) ? normalized.toolCalls : [];
           let content = normalized.content;
+          let outputText = normalized.outputText || content;
+          let parsedOutput = normalized.parsedOutput;
 
-          if (expectsJson) {
+          if (expectsJson && toolCalls.length === 0) {
             content = stripJsonCodeFence(content);
+            outputText = stripJsonCodeFence(outputText || content);
             const parsedResult = tryParseJson(content);
 
             if (!parsedResult.ok && strictJson) {
@@ -428,9 +542,9 @@ router.post('/run', async (req, res) => {
                 blockedReason: normalized.blockedReason,
                 truncated,
                 metadata: {
-                  requestedMaxTokens: body.maxTokens ?? null,
-                  responseMimeType: body.responseMimeType,
-                  responseSchemaProvided: !!body.responseSchema,
+                  requestedMaxTokens: resolvedMaxTokens ?? null,
+                  responseMimeType: resolvedResponseMimeType,
+                  responseSchemaProvided: !!(resolvedResponseSchema || resolvedResponseJsonSchema),
                   strictJson
                 }
               });
@@ -438,20 +552,29 @@ router.post('/run', async (req, res) => {
 
             if (parsedResult.ok) {
               content = JSON.stringify(parsedResult.parsed);
+              outputText = content;
+              parsedOutput = parsedResult.parsed;
             }
           }
 
           res.json({
             type: 'text',
             content,
+            message: {
+              role: normalized.messageRole,
+              content,
+              tool_calls: toolCalls
+            },
+            output_text: outputText,
+            parsed_output: parsedOutput ?? null,
             finishReason,
             usage: normalized.usage,
             blockedReason: normalized.blockedReason,
             truncated,
             metadata: {
-              requestedMaxTokens: body.maxTokens ?? null,
-              responseMimeType: body.responseMimeType || 'text/plain',
-              responseSchemaProvided: !!body.responseSchema,
+              requestedMaxTokens: resolvedMaxTokens ?? null,
+              responseMimeType: resolvedResponseMimeType || 'text/plain',
+              responseSchemaProvided: !!(resolvedResponseSchema || resolvedResponseJsonSchema),
               strictJson,
               provider: normalized.providerMetadata
             }

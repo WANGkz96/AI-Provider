@@ -1,4 +1,4 @@
-import { GoogleGenAI, PersonGeneration } from '@google/genai';
+import { FunctionCallingConfigMode, GoogleGenAI, PersonGeneration } from '@google/genai';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,10 +48,10 @@ export class GoogleAdapter extends BaseAdapter {
   }
 
   async health() {
-    // We strictly test if we can list models or check a basic availability
-    // Relying on a specific model existence (like gemini-1.5) is brittle.
-    // Native SDK doesn't have a simple "ping". 
-    // We will assume true if API key is present, as actual 404s/Auth errors happen at generation time.
+    // We strictly test only local configuration. Real auth/model errors happen at request time.
+    if (this.useVertex) {
+      return !!this.project;
+    }
     return !!this.apiKey;
   }
 
@@ -92,12 +92,16 @@ export class GoogleAdapter extends BaseAdapter {
 
     console.log(`[GoogleAdapter:GeminiMultimodal] Requesting model: ${model}`);
 
-    const { contents } = await this.buildGeminiMultimodalContents({ prompt, messages, media });
+    const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media });
     const config = {
       topP: options?.topP,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
-      responseSchema: options?.responseSchema
+      responseSchema: options?.responseJsonSchema ? undefined : options?.responseSchema,
+      responseJsonSchema: options?.responseJsonSchema,
+      tools: this.mapOpenAIToolsToGemini(options?.tools),
+      toolConfig: this.mapToolChoiceToGemini(options?.toolChoice),
+      systemInstruction
     };
 
     // Thinking config does not combine reliably with file parts across models.
@@ -117,45 +121,162 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     const response = await this.imageAI.models.generateContent(request);
-    return this.formatGeminiContentResponse(response);
-  }
-
-  async buildGeminiMultimodalContents({ prompt, messages, media }) {
-    const normalizedMessages = this.normalizeMessages({ prompt, messages });
-    const historyMessages = normalizedMessages.slice(0, -1);
-    const lastMessage = normalizedMessages[normalizedMessages.length - 1];
-
-    const contents = historyMessages.map((message) => this.mapTextMessageToGeminiContent(message));
-
-    const userText = this.normalizeText(lastMessage?.content);
-    const userParts = await this.buildGeminiMediaParts(media);
-
-    if (userText) {
-      userParts.push({ text: userText });
-    }
-
-    if (!userParts.length) {
-      throw new Error('No prompt/messages provided for multimodal generation');
-    }
-
-    contents.push({
-      role: 'user',
-      parts: userParts
+    return this.formatGeminiContentResponse(response, {
+      responseMimeType: options?.responseMimeType
     });
-
-    return { contents };
   }
 
-  mapTextMessageToGeminiContent(message) {
-    const role = message?.role === 'assistant' ? 'model' : 'user';
-    const text = this.normalizeText(message?.content);
-    const finalText = message?.role === 'system' ? `[SYSTEM]\n${text}` : text;
+  async buildGeminiRequestContents({ prompt, messages, media }) {
+    const normalizedMessages = this.normalizeMessages({ prompt, messages });
+    const mediaMessageIndex = this.resolveMediaMessageIndex(normalizedMessages, media);
+    const contents = [];
+    const systemInstructions = [];
+    const toolNameById = new Map();
+    let encounteredNonSystem = false;
+
+    for (let index = 0; index < normalizedMessages.length; index += 1) {
+      const message = normalizedMessages[index];
+
+      if (message?.role === 'system') {
+        const systemText = this.normalizeText(message?.content);
+        if (this.useVertex && !encounteredNonSystem) {
+          if (systemText) {
+            systemInstructions.push(systemText);
+          }
+          continue;
+        }
+
+        const fallbackSystemMessage = this.buildTextContent('user', `[SYSTEM]\n${systemText}`);
+        if (fallbackSystemMessage) {
+          contents.push(fallbackSystemMessage);
+        }
+        continue;
+      }
+
+      encounteredNonSystem = true;
+      const content = await this.mapMessageToGeminiContent({
+        message,
+        index,
+        mediaMessageIndex,
+        media,
+        toolNameById
+      });
+
+      if (content) {
+        contents.push(content);
+      }
+    }
+
+    if (!contents.length) {
+      throw new Error('No prompt/messages provided for text generation');
+    }
+
+    return {
+      contents,
+      systemInstruction: systemInstructions.length > 0
+        ? systemInstructions.join('\n\n')
+        : undefined
+    };
+  }
+
+  resolveMediaMessageIndex(messages, media) {
+    if (!Array.isArray(media) || media.length === 0) {
+      return -1;
+    }
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user') {
+        return index;
+      }
+    }
+
+    throw new Error('Media attachments require at least one user message');
+  }
+
+  async mapMessageToGeminiContent({ message, index, mediaMessageIndex, media, toolNameById }) {
+    if (!message || typeof message !== 'object') {
+      return null;
+    }
+
+    if (message.role === 'user') {
+      const parts = [];
+
+      if (index === mediaMessageIndex) {
+        const mediaParts = await this.buildGeminiMediaParts(media);
+        parts.push(...mediaParts);
+      }
+
+      const userText = this.normalizeText(message.content);
+      if (userText) {
+        parts.push({ text: userText });
+      }
+
+      return parts.length > 0
+        ? { role: 'user', parts }
+        : null;
+    }
+
+    if (message.role === 'assistant') {
+      const parts = [];
+      const assistantText = this.normalizeText(message.content);
+
+      if (assistantText) {
+        parts.push({ text: assistantText });
+      }
+
+      for (const toolCall of this.normalizeAssistantToolCalls(message.tool_calls)) {
+        if (toolCall.id) {
+          toolNameById.set(toolCall.id, toolCall.name);
+        }
+
+        parts.push({
+          functionCall: this.removeUndefined({
+            id: toolCall.id,
+            name: toolCall.name,
+            args: toolCall.arguments
+          })
+        });
+      }
+
+      return parts.length > 0
+        ? { role: 'model', parts }
+        : null;
+    }
+
+    if (message.role === 'tool') {
+      const toolName = message.name || (message.tool_call_id ? toolNameById.get(message.tool_call_id) : undefined);
+
+      if (!toolName) {
+        throw new Error('Unable to map tool message to function name. Provide message.name or include the prior assistant tool call with the same tool_call_id.');
+      }
+
+      return {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: this.removeUndefined({
+              id: message.tool_call_id,
+              name: toolName,
+              response: this.normalizeToolMessageResponse(message.content)
+            })
+          }
+        ]
+      };
+    }
+
+    return this.buildTextContent('user', this.normalizeText(message.content));
+  }
+
+  buildTextContent(role, text) {
+    if (!text) {
+      return null;
+    }
 
     return {
       role,
       parts: [
         {
-          text: finalText
+          text
         }
       ]
     };
@@ -301,9 +422,23 @@ export class GoogleAdapter extends BaseAdapter {
     return transformStream();
   }
 
-  formatGeminiContentResponse(response) {
+  formatGeminiContentResponse(response, { responseMimeType } = {}) {
+    const content = this.extractGeminiText(response);
+    const toolCalls = this.mapGeminiFunctionCalls(response?.functionCalls);
+    const parsedOutput = responseMimeType === 'application/json' && toolCalls.length === 0
+      ? this.tryParseJsonContent(content)
+      : null;
+
     return {
-      content: this.extractGeminiText(response),
+      content,
+      outputText: content,
+      parsedOutput,
+      toolCalls,
+      message: {
+        role: 'assistant',
+        content,
+        toolCalls
+      },
       finishReason: response?.candidates?.[0]?.finishReason ?? null,
       usage: this.mapNativeUsage(response?.usageMetadata),
       blockedReason: response?.promptFeedback?.blockReason ?? null,
@@ -349,6 +484,165 @@ export class GoogleAdapter extends BaseAdapter {
     if (typeof value === 'string') return value;
     if (value === null || value === undefined) return '';
     return String(value);
+  }
+
+  normalizeAssistantToolCalls(toolCalls) {
+    if (!Array.isArray(toolCalls)) {
+      return [];
+    }
+
+    return toolCalls
+      .map((toolCall, index) => {
+        const name = this.normalizeText(toolCall?.name).trim();
+        if (!name) {
+          return null;
+        }
+
+        const id = this.normalizeText(toolCall?.id).trim() || `call_${index + 1}`;
+        return {
+          id,
+          name,
+          arguments: this.normalizeToolArguments(toolCall?.arguments)
+        };
+      })
+      .filter(Boolean);
+  }
+
+  normalizeToolArguments(argumentsValue) {
+    if (argumentsValue === null || argumentsValue === undefined || argumentsValue === '') {
+      return {};
+    }
+
+    if (typeof argumentsValue === 'string') {
+      const parsed = this.tryParseJsonContent(argumentsValue);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+      return {};
+    }
+
+    if (typeof argumentsValue === 'object' && !Array.isArray(argumentsValue)) {
+      return argumentsValue;
+    }
+
+    return {};
+  }
+
+  normalizeToolMessageResponse(content) {
+    const normalizedContent = this.normalizeText(content).trim();
+    if (!normalizedContent) {
+      return { output: null };
+    }
+
+    const parsed = this.tryParseJsonContent(normalizedContent);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+
+    if (parsed !== null) {
+      return { output: parsed };
+    }
+
+    return { output: normalizedContent };
+  }
+
+  tryParseJsonContent(value) {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  mapOpenAIToolsToGemini(tools) {
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return undefined;
+    }
+
+    const functionDeclarations = tools
+      .filter((tool) => tool?.type === 'function' && tool?.function?.name)
+      .map((tool) => this.removeUndefined({
+        name: tool.function.name,
+        description: tool.function.description,
+        parametersJsonSchema: tool.function.parameters
+      }));
+
+    if (functionDeclarations.length === 0) {
+      return undefined;
+    }
+
+    return [{ functionDeclarations }];
+  }
+
+  mapToolChoiceToGemini(toolChoice) {
+    if (toolChoice === undefined || toolChoice === null) {
+      return undefined;
+    }
+
+    let mode;
+    let allowedFunctionNames;
+
+    if (typeof toolChoice === 'object' && toolChoice.type === 'function') {
+      mode = FunctionCallingConfigMode.ANY;
+      allowedFunctionNames = [toolChoice.function?.name].filter(Boolean);
+    } else if (typeof toolChoice === 'string') {
+      const normalized = toolChoice.trim();
+
+      if (!normalized) {
+        return undefined;
+      }
+
+      if (normalized === 'auto') {
+        mode = FunctionCallingConfigMode.AUTO;
+      } else if (normalized === 'required') {
+        mode = FunctionCallingConfigMode.ANY;
+      } else if (normalized === 'none') {
+        mode = FunctionCallingConfigMode.NONE;
+      } else if (normalized === 'validated') {
+        mode = FunctionCallingConfigMode.VALIDATED;
+      } else {
+        mode = FunctionCallingConfigMode.ANY;
+        allowedFunctionNames = [normalized];
+      }
+    }
+
+    if (!mode) {
+      return undefined;
+    }
+
+    return {
+      functionCallingConfig: this.removeUndefined({
+        mode,
+        allowedFunctionNames: Array.isArray(allowedFunctionNames) && allowedFunctionNames.length > 0
+          ? allowedFunctionNames
+          : undefined
+      })
+    };
+  }
+
+  mapGeminiFunctionCalls(functionCalls) {
+    if (!Array.isArray(functionCalls) || functionCalls.length === 0) {
+      return [];
+    }
+
+    return functionCalls
+      .map((call, index) => {
+        const name = this.normalizeText(call?.name).trim();
+        if (!name) {
+          return null;
+        }
+
+        return {
+          id: this.normalizeText(call?.id).trim() || `call_${index + 1}`,
+          name,
+          arguments: this.normalizeToolArguments(call?.args)
+        };
+      })
+      .filter(Boolean);
   }
 
   stripDataUrlPrefix(value) {
@@ -413,23 +707,18 @@ export class GoogleAdapter extends BaseAdapter {
   async generateViaGenAI({ model, prompt, messages, stream, options }) {
     console.log(`[GoogleAdapter:GenAI] Requesting model: ${model}`);
 
-    const inputMessages = this.normalizeMessages({ prompt, messages });
-
-    const contents = inputMessages.map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [
-        {
-          text: m.role === 'system' ? `[SYSTEM]\n${m.content}` : m.content
-        }
-      ]
-    }));
+    const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages });
 
     const config = {
       temperature: options?.thinking ? undefined : options?.temperature,
       topP: options?.topP,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
-      responseSchema: options?.responseSchema,
+      responseSchema: options?.responseJsonSchema ? undefined : options?.responseSchema,
+      responseJsonSchema: options?.responseJsonSchema,
+      tools: this.mapOpenAIToolsToGemini(options?.tools),
+      toolConfig: this.mapToolChoiceToGemini(options?.toolChoice),
+      systemInstruction,
       ...(options?.thinking ? {
         thinkingConfig: {
           includeThoughts: options.thinking.includeThoughts,
@@ -451,7 +740,9 @@ export class GoogleAdapter extends BaseAdapter {
 
     const response = await this.genAI.models.generateContent(request);
     
-    const formatted = this.formatGeminiContentResponse(response);
+    const formatted = this.formatGeminiContentResponse(response, {
+      responseMimeType: options?.responseMimeType
+    });
     formatted.metadata = {
       ...formatted.metadata,
       mode: 'genai',
