@@ -137,6 +137,22 @@ export class GoogleAdapter extends BaseAdapter {
     for (let index = 0; index < normalizedMessages.length; index += 1) {
       const message = normalizedMessages[index];
 
+      if (message?.role === 'tool') {
+        encounteredNonSystem = true;
+        const { content, nextIndex } = this.buildAggregatedToolResponseContent({
+          messages: normalizedMessages,
+          startIndex: index,
+          toolNameById
+        });
+
+        if (content) {
+          contents.push(content);
+        }
+
+        index = nextIndex;
+        continue;
+      }
+
       if (message?.role === 'system') {
         const systemText = this.normalizeText(message?.content);
         if (this.useVertex && !encounteredNonSystem) {
@@ -176,6 +192,47 @@ export class GoogleAdapter extends BaseAdapter {
       systemInstruction: systemInstructions.length > 0
         ? systemInstructions.join('\n\n')
         : undefined
+    };
+  }
+
+  buildAggregatedToolResponseContent({ messages, startIndex, toolNameById }) {
+    const parts = [];
+    let nextIndex = startIndex;
+
+    while (nextIndex < messages.length && messages[nextIndex]?.role === 'tool') {
+      const toolMessage = messages[nextIndex];
+      const preservedParts = this.extractIncomingParts(toolMessage);
+
+      if (preservedParts.length > 0) {
+        parts.push(...preservedParts);
+        nextIndex += 1;
+        continue;
+      }
+
+      const toolName = toolMessage.name || (
+        toolMessage.tool_call_id
+          ? toolNameById.get(toolMessage.tool_call_id)
+          : undefined
+      );
+
+      if (!toolName) {
+        throw new Error('Unable to map tool message to function name. Provide message.name or include the prior assistant tool call with the same tool_call_id.');
+      }
+
+      parts.push({
+        functionResponse: this.removeUndefined({
+          id: toolMessage.tool_call_id,
+          name: toolName,
+          response: this.normalizeToolMessageResponse(toolMessage.content)
+        })
+      });
+
+      nextIndex += 1;
+    }
+
+    return {
+      content: parts.length > 0 ? { role: 'user', parts } : null,
+      nextIndex: nextIndex - 1
     };
   }
 
@@ -255,34 +312,6 @@ export class GoogleAdapter extends BaseAdapter {
       return parts.length > 0
         ? { role: 'model', parts }
         : null;
-    }
-
-    if (message.role === 'tool') {
-      if (preservedParts.length > 0) {
-        return {
-          role: 'user',
-          parts: preservedParts
-        };
-      }
-
-      const toolName = message.name || (message.tool_call_id ? toolNameById.get(message.tool_call_id) : undefined);
-
-      if (!toolName) {
-        throw new Error('Unable to map tool message to function name. Provide message.name or include the prior assistant tool call with the same tool_call_id.');
-      }
-
-      return {
-        role: 'user',
-        parts: [
-          {
-            functionResponse: this.removeUndefined({
-              id: message.tool_call_id,
-              name: toolName,
-              response: this.normalizeToolMessageResponse(message.content)
-            })
-          }
-        ]
-      };
     }
 
     return this.buildTextContent('user', this.normalizeText(message.content));
@@ -522,6 +551,17 @@ export class GoogleAdapter extends BaseAdapter {
   extractGeminiText(responseLike) {
     if (!responseLike) return '';
 
+    const parts = responseLike?.candidates?.[0]?.content?.parts || [];
+    if (parts.length > 0) {
+      return parts
+        .map((part) => (
+          typeof part?.text === 'string' && !part?.thought
+            ? part.text
+            : ''
+        ))
+        .join('');
+    }
+
     if (typeof responseLike.text === 'function') {
       return responseLike.text() || '';
     }
@@ -530,10 +570,7 @@ export class GoogleAdapter extends BaseAdapter {
       return responseLike.text;
     }
 
-    const parts = responseLike?.candidates?.[0]?.content?.parts || [];
-    return parts
-      .map((part) => (typeof part?.text === 'string' ? part.text : ''))
-      .join('');
+    return '';
   }
 
   normalizeVideoMetadata(videoMetadata) {
