@@ -280,33 +280,28 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     if (message.role === 'assistant') {
+      const reconstructedToolCallParts = this.buildFunctionCallPartsFromToolCalls(message.tool_calls, toolNameById);
+
       if (preservedParts.length > 0) {
-        this.registerToolNamesFromParts(toolNameById, preservedParts);
+        const assistantParts = this.hasFunctionCallPart(preservedParts)
+          ? preservedParts
+          : [...preservedParts, ...reconstructedToolCallParts];
+
+        this.registerToolNamesFromParts(toolNameById, assistantParts);
         return {
           role: this.normalizeContentRole(message.provider_state?.role, 'model'),
-          parts: preservedParts
+          parts: assistantParts
         };
       }
 
       const parts = [];
-      const assistantText = this.normalizeText(message.content);
-
-      if (assistantText) {
+      if (reconstructedToolCallParts.length > 0) {
+        parts.push(...reconstructedToolCallParts);
+      } else {
+        const assistantText = this.normalizeText(message.content);
+        if (assistantText) {
           parts.push({ text: assistantText });
-      }
-
-      for (const toolCall of this.normalizeAssistantToolCalls(message.tool_calls)) {
-        if (toolCall.id) {
-          toolNameById.set(toolCall.id, toolCall.name);
         }
-
-        parts.push({
-          functionCall: this.removeUndefined({
-            id: toolCall.id,
-            name: toolCall.name,
-            args: toolCall.arguments
-          })
-        });
       }
 
       return parts.length > 0
@@ -357,6 +352,26 @@ export class GoogleAdapter extends BaseAdapter {
         toolNameById.set(id, name);
       }
     }
+  }
+
+  buildFunctionCallPartsFromToolCalls(toolCalls, toolNameById) {
+    return this.normalizeAssistantToolCalls(toolCalls).map((toolCall) => {
+      if (toolCall.id) {
+        toolNameById.set(toolCall.id, toolCall.name);
+      }
+
+      return {
+        functionCall: this.removeUndefined({
+          id: toolCall.id,
+          name: toolCall.name,
+          args: toolCall.arguments
+        })
+      };
+    });
+  }
+
+  hasFunctionCallPart(parts) {
+    return Array.isArray(parts) && parts.some((part) => part?.functionCall);
   }
 
   normalizeContentRole(role, fallback = 'user') {
@@ -812,10 +827,71 @@ export class GoogleAdapter extends BaseAdapter {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  summarizeGeminiContents(contents) {
+    return (contents || []).map((content, index) => ({
+      index,
+      role: content?.role || null,
+      partTypes: (content?.parts || []).map((part) => {
+        if (part?.functionCall) {
+          return `functionCall:${part.functionCall.name || 'unknown'}:${part.functionCall.id || 'no-id'}`;
+        }
+        if (part?.functionResponse) {
+          return `functionResponse:${part.functionResponse.name || 'unknown'}:${part.functionResponse.id || 'no-id'}`;
+        }
+        if (part?.text && part?.thought) {
+          return 'thought:text';
+        }
+        if (part?.thoughtSignature) {
+          return 'thoughtSignature';
+        }
+        if (part?.text) {
+          return 'text';
+        }
+        if (part?.inlineData) {
+          return 'inlineData';
+        }
+        if (part?.fileData) {
+          return 'fileData';
+        }
+        return 'other';
+      })
+    }));
+  }
+
+  validateFunctionResponseAdjacency(contents) {
+    for (let index = 0; index < (contents || []).length; index += 1) {
+      const content = contents[index];
+      const hasFunctionResponses = Array.isArray(content?.parts) && content.parts.some((part) => part?.functionResponse);
+
+      if (!hasFunctionResponses) {
+        continue;
+      }
+
+      const previous = index > 0 ? contents[index - 1] : null;
+      const previousRole = this.normalizeContentRole(previous?.role, 'user');
+      const previousHasFunctionCalls = Array.isArray(previous?.parts) && previous.parts.some((part) => part?.functionCall);
+
+      if (previousRole !== 'model' || !previousHasFunctionCalls) {
+        return {
+          valid: false,
+          reason: `functionResponse turn at index ${index} is not immediately preceded by a model functionCall turn`,
+          summary: this.summarizeGeminiContents(contents)
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
   async generateViaGenAI({ model, prompt, messages, stream, options }) {
     console.log(`[GoogleAdapter:GenAI] Requesting model: ${model}`);
 
     const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages });
+    const historyValidation = this.validateFunctionResponseAdjacency(contents);
+
+    if (!historyValidation.valid) {
+      throw new Error(`Invalid function calling history before Vertex request: ${historyValidation.reason}. Summary: ${JSON.stringify(historyValidation.summary)}`);
+    }
 
     const config = {
       temperature: options?.thinking ? undefined : options?.temperature,
@@ -846,7 +922,15 @@ export class GoogleAdapter extends BaseAdapter {
       return this.transformGeminiContentStream(responseStream);
     }
 
-    const response = await this.genAI.models.generateContent(request);
+    let response;
+    try {
+      response = await this.genAI.models.generateContent(request);
+    } catch (error) {
+      if (error?.status === 400) {
+        console.error('[GoogleAdapter:GenAI] Rejected contents summary:', JSON.stringify(this.summarizeGeminiContents(contents)));
+      }
+      throw error;
+    }
     
     const formatted = this.formatGeminiContentResponse(response, {
       responseMimeType: options?.responseMimeType
