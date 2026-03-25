@@ -119,7 +119,8 @@ const runSchema = z.object({
   maxTokens: z.number().optional(),
   max_tokens: z.number().optional(),
   thinking: z.object({
-    budget: z.number().min(1024),
+    budget: z.number().int().min(-1).optional(),
+    level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
     includeThoughts: z.boolean().default(false)
   }).optional(),
   responseMimeType: z.enum(['text/plain', 'application/json']).optional(),

@@ -33,6 +33,9 @@
                      <label class="text-xs text-slate-400 font-medium">Include Thoughts</label>
                      <input type="checkbox" v-model="params.thinking.includeThoughts" class="accent-blue-500 w-4 h-4 rounded border-slate-600 bg-slate-700">
                   </div>
+                  <p class="text-[10px] leading-4 text-slate-500">
+                    Thinking responses are sent without SSE streaming so Gemini thought parts and provider state can be preserved.
+                  </p>
                </div>
             </div>
 
@@ -47,8 +50,7 @@
                 <input 
                   type="range" min="0" max="2" step="0.1" 
                   v-model.number="params.temperature"
-                  :disabled="params.thinking.enabled"
-                  class="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  class="w-full accent-blue-500 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                 >
               </div>
 
@@ -348,6 +350,13 @@
                             <span class="text-blue-200/70">-</span>
                             <span class="truncate max-w-[220px]">{{ attachment.name }}</span>
                         </span>
+                    </div>
+                    <div
+                        v-if="msg.role === 'assistant' && Array.isArray(msg.thoughts) && msg.thoughts.length > 0"
+                        class="mb-3 rounded-xl border border-blue-500/20 bg-slate-900/70 px-4 py-3"
+                    >
+                        <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-300/70">&lt;thought&gt;</div>
+                        <div class="whitespace-pre-wrap text-xs leading-6 text-slate-400">{{ msg.thoughts.join('\n\n') }}</div>
                     </div>
                     <div class="whitespace-pre-wrap font-light tracking-wide">{{ msg.content }}</div>
                     </div>
@@ -1292,6 +1301,75 @@ const buildMediaPayload = async (files) => {
     })));
 };
 
+const extractThoughtTexts = (parts) => {
+    if (!Array.isArray(parts)) {
+        return [];
+    }
+
+    return parts
+        .filter((part) => part?.thought === true && typeof part?.text === 'string' && part.text.length > 0)
+        .map((part) => part.text);
+};
+
+const serializeChatMessageForRequest = (message) => {
+    const payload = {
+        role: message.role,
+        content: typeof message.content === 'string' ? message.content : ''
+    };
+
+    if (Array.isArray(message.parts) && message.parts.length > 0) {
+        payload.parts = message.parts;
+    }
+
+    if (message.provider_state && typeof message.provider_state === 'object') {
+        payload.provider_state = message.provider_state;
+    }
+
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+        payload.tool_calls = message.tool_calls;
+    }
+
+    if (typeof message.tool_call_id === 'string' && message.tool_call_id.length > 0) {
+        payload.tool_call_id = message.tool_call_id;
+    }
+
+    if (typeof message.name === 'string' && message.name.length > 0) {
+        payload.name = message.name;
+    }
+
+    return payload;
+};
+
+const buildAssistantMessageFromRunResponse = (data) => {
+    const message = data?.message && typeof data.message === 'object' ? data.message : {};
+    const parts = Array.isArray(message.parts)
+        ? message.parts
+        : (Array.isArray(message.provider_state?.parts)
+            ? message.provider_state.parts
+            : (Array.isArray(data?.parts)
+                ? data.parts
+                : (Array.isArray(data?.provider_state?.parts) ? data.provider_state.parts : [])));
+    const providerState = message.provider_state
+        ?? data?.provider_state
+        ?? message.providerState
+        ?? data?.providerState
+        ?? (parts.length > 0 ? { role: message.role || 'model', parts } : null);
+
+    return {
+        role: message.role || 'assistant',
+        content: typeof data?.content === 'string'
+            ? data.content
+            : (typeof message.content === 'string' ? message.content : ''),
+        parts,
+        provider_state: providerState,
+        thoughts: extractThoughtTexts(parts),
+        tool_calls: Array.isArray(message.tool_calls)
+            ? message.tool_calls
+            : (Array.isArray(message.toolCalls) ? message.toolCalls : []),
+        isError: false
+    };
+};
+
 const handleTextareaKeydown = (event) => {
     if (event.key !== 'Enter') return;
     if (event.shiftKey) return;
@@ -1327,11 +1405,13 @@ const sendMessage = async () => {
 
   try {
     const mediaPayload = await buildMediaPayload(pendingAttachments);
-    const shouldStream = params.stream && mediaPayload.length === 0;
+    const shouldStream = params.stream && mediaPayload.length === 0 && !params.thinking.enabled;
 
     const payload = {
         model: selectedModel.value,
-        messages: messages.value.map(m => ({ role: m.role, content: m.content })),
+        messages: messages.value
+            .filter((message) => !message.isError)
+            .map((message) => serializeChatMessageForRequest(message)),
         stream: shouldStream,
         temperature: params.temperature,
         topP: params.topP,
@@ -1361,7 +1441,14 @@ const sendMessage = async () => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         
-        messages.value.push({ role: 'assistant', content: '', isError: false });
+        messages.value.push({
+            role: 'assistant',
+            content: '',
+            thoughts: [],
+            parts: [],
+            provider_state: null,
+            isError: false
+        });
         const lastIdx = messages.value.length - 1;
 
         while (true) {
@@ -1389,7 +1476,7 @@ const sendMessage = async () => {
         }
     } else {
         const res = await axios.post('/run', payload);
-        messages.value.push({ role: 'assistant', content: res.data.content });
+        messages.value.push(buildAssistantMessageFromRunResponse(res.data));
     }
 
   } catch (err) {

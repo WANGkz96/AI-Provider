@@ -94,6 +94,7 @@ export class GoogleAdapter extends BaseAdapter {
 
     const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media });
     const config = {
+      temperature: options?.temperature,
       topP: options?.topP,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
@@ -103,11 +104,6 @@ export class GoogleAdapter extends BaseAdapter {
       toolConfig: this.mapToolChoiceToGemini(options?.toolChoice),
       systemInstruction
     };
-
-    // Thinking config does not combine reliably with file parts across models.
-    if (!options?.thinking) {
-      config.temperature = options?.temperature;
-    }
 
     const request = {
       model,
@@ -383,6 +379,90 @@ export class GoogleAdapter extends BaseAdapter {
       return 'user';
     }
     return fallback;
+  }
+
+  isGemini3ThinkingModel(model) {
+    const normalizedModel = this.normalizeText(model).trim().toLowerCase();
+    return /^gemini-3([.-]|$)/.test(normalizedModel);
+  }
+
+  isGeminiModel(model) {
+    const normalizedModel = this.normalizeText(model).trim().toLowerCase();
+    return normalizedModel.startsWith('gemini-');
+  }
+
+  normalizeThinkingLevel(level) {
+    const normalizedLevel = this.normalizeText(level).trim().toUpperCase();
+    if (['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'].includes(normalizedLevel)) {
+      return normalizedLevel;
+    }
+    return undefined;
+  }
+
+  normalizeThinkingBudget(budget) {
+    if (budget === null || budget === undefined || budget === '') {
+      return undefined;
+    }
+
+    const numericBudget = Number(budget);
+    if (!Number.isFinite(numericBudget)) {
+      return undefined;
+    }
+
+    return Math.trunc(numericBudget);
+  }
+
+  mapGemini3ThinkingLevelFromBudget(budget) {
+    const normalizedBudget = this.normalizeThinkingBudget(budget);
+
+    if (normalizedBudget === undefined || normalizedBudget === -1) {
+      return undefined;
+    }
+
+    if (normalizedBudget <= 1024) {
+      return 'MINIMAL';
+    }
+
+    if (normalizedBudget <= 4096) {
+      return 'LOW';
+    }
+
+    if (normalizedBudget <= 8192) {
+      return 'MEDIUM';
+    }
+
+    return 'HIGH';
+  }
+
+  buildGeminiThinkingConfig(model, thinking) {
+    if (!thinking || typeof thinking !== 'object') {
+      return undefined;
+    }
+
+    if (!this.isGeminiModel(model)) {
+      return undefined;
+    }
+
+    const includeThoughts = thinking.includeThoughts === true ? true : undefined;
+    const explicitLevel = this.normalizeThinkingLevel(thinking.level);
+
+    if (this.isGemini3ThinkingModel(model)) {
+      const thinkingLevel = explicitLevel ?? this.mapGemini3ThinkingLevelFromBudget(thinking.budget);
+      const config = this.removeUndefined({
+        includeThoughts,
+        thinkingLevel
+      });
+
+      return Object.keys(config).length > 0 ? config : undefined;
+    }
+
+    const thinkingBudget = this.normalizeThinkingBudget(thinking.budget);
+    const config = this.removeUndefined({
+      includeThoughts,
+      thinkingBudget
+    });
+
+    return Object.keys(config).length > 0 ? config : undefined;
   }
 
   async buildGeminiMediaParts(media) {
@@ -893,8 +973,9 @@ export class GoogleAdapter extends BaseAdapter {
       throw new Error(`Invalid function calling history before Vertex request: ${historyValidation.reason}. Summary: ${JSON.stringify(historyValidation.summary)}`);
     }
 
+    const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
     const config = {
-      temperature: options?.thinking ? undefined : options?.temperature,
+      temperature: options?.temperature,
       topP: options?.topP,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
@@ -903,12 +984,7 @@ export class GoogleAdapter extends BaseAdapter {
       tools: this.mapOpenAIToolsToGemini(options?.tools),
       toolConfig: this.mapToolChoiceToGemini(options?.toolChoice),
       systemInstruction,
-      ...(options?.thinking ? {
-        thinkingConfig: {
-          includeThoughts: options.thinking.includeThoughts,
-          thinkingBudget: options.thinking.budget
-        }
-      } : {})
+      thinkingConfig
     };
 
     const request = {
@@ -938,7 +1014,13 @@ export class GoogleAdapter extends BaseAdapter {
     formatted.metadata = {
       ...formatted.metadata,
       mode: 'genai',
-      model
+      model,
+      effectiveConfig: this.removeUndefined({
+        temperature: config.temperature,
+        topP: config.topP,
+        maxOutputTokens: config.maxOutputTokens,
+        thinkingConfig: config.thinkingConfig
+      })
     };
     return formatted;
   }
