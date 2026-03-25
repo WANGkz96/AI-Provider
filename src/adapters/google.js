@@ -592,12 +592,24 @@ export class GoogleAdapter extends BaseAdapter {
 
   transformGeminiContentStream(streamResponse) {
     const extractChunkText = this.extractGeminiText.bind(this);
+    const extractThoughtText = this.extractGeminiThoughtText.bind(this);
+    const cloneParts = this.cloneParts.bind(this);
 
     const transformStream = async function* () {
       for await (const chunk of streamResponse) {
+        const candidateContent = chunk?.candidates?.[0]?.content;
+        const parts = cloneParts(candidateContent?.parts);
         const content = extractChunkText(chunk);
-        if (content) {
-          yield { text: () => content };
+        const thought = extractThoughtText(chunk);
+
+        if (content || thought || parts.length > 0) {
+          yield {
+            text: () => content,
+            content,
+            thought,
+            parts,
+            role: candidateContent?.role ?? 'model'
+          };
         }
       }
     };
@@ -663,6 +675,23 @@ export class GoogleAdapter extends BaseAdapter {
 
     if (typeof responseLike.text === 'string') {
       return responseLike.text;
+    }
+
+    return '';
+  }
+
+  extractGeminiThoughtText(responseLike) {
+    if (!responseLike) return '';
+
+    const parts = responseLike?.candidates?.[0]?.content?.parts || [];
+    if (parts.length > 0) {
+      return parts
+        .map((part) => (
+          typeof part?.text === 'string' && part?.thought
+            ? part.text
+            : ''
+        ))
+        .join('');
     }
 
     return '';

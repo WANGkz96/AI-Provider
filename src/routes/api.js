@@ -486,14 +486,51 @@ router.post('/run', async (req, res) => {
 
       try {
         const stream = await provider.generate({ ...generateParams, stream: true });
+        const streamedParts = [];
+        let streamedRole = 'model';
+
         for await (const chunk of stream) {
             const chunkText = typeof chunk?.text === 'function'
               ? chunk.text()
               : (typeof chunk === 'string'
                 ? chunk
                 : (chunk instanceof Uint8Array ? Buffer.from(chunk).toString('utf8') : ''));
-            res.write(`data: ${JSON.stringify({ content: chunkText })}\n\n`);
+
+            const chunkThought = typeof chunk?.thought === 'string'
+              ? chunk.thought
+              : '';
+            const chunkParts = Array.isArray(chunk?.parts) ? chunk.parts : [];
+
+            if (typeof chunk?.role === 'string' && chunk.role.length > 0) {
+              streamedRole = chunk.role;
+            }
+
+            if (chunkParts.length > 0) {
+              streamedParts.push(...chunkParts);
+            }
+
+            const payload = {};
+            if (chunkText) {
+              payload.content = chunkText;
+            }
+            if (chunkThought) {
+              payload.thought = chunkThought;
+            }
+
+            if (Object.keys(payload).length > 0) {
+              res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            }
         }
+
+        if (streamedParts.length > 0) {
+          res.write(`data: ${JSON.stringify({
+            provider_state: {
+              role: streamedRole,
+              parts: streamedParts
+            }
+          })}\n\n`);
+        }
+
         res.write('data: [DONE]\n\n');
         res.end();
       } catch (streamError) {

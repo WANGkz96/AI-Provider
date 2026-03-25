@@ -25,16 +25,25 @@
                </div>
                
                <div v-if="params.thinking.enabled" class="space-y-4 p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 animate-in fade-in slide-in-from-top-2">
-                  <div>
+                  <div v-if="supportsThinkingLevel">
+                    <label class="text-xs text-slate-400 font-medium block mb-1.5">Thinking Level</label>
+                    <select v-model="params.thinking.level" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs focus:border-blue-500 outline-none transition-colors">
+                      <option value="MINIMAL">MINIMAL</option>
+                      <option value="LOW">LOW</option>
+                      <option value="MEDIUM">MEDIUM</option>
+                      <option value="HIGH">HIGH</option>
+                    </select>
+                  </div>
+                  <div v-else>
                     <label class="text-xs text-slate-400 font-medium block mb-1.5">Budget (tokens)</label>
-                    <input type="number" v-model="params.thinking.budget" step="1024" min="1024" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs focus:border-blue-500 outline-none transition-colors">
+                    <input type="number" v-model="params.thinking.budget" step="1024" min="-1" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs focus:border-blue-500 outline-none transition-colors">
                   </div>
                   <div class="flex items-center justify-between">
                      <label class="text-xs text-slate-400 font-medium">Include Thoughts</label>
                      <input type="checkbox" v-model="params.thinking.includeThoughts" class="accent-blue-500 w-4 h-4 rounded border-slate-600 bg-slate-700">
                   </div>
                   <p class="text-[10px] leading-4 text-slate-500">
-                    Thinking responses are sent without SSE streaming so Gemini thought parts and provider state can be preserved.
+                    Gemini thought summaries are best-effort. When available, thoughts and answer stream separately and the final provider state is preserved for the next turn.
                   </p>
                </div>
             </div>
@@ -352,11 +361,11 @@
                         </span>
                     </div>
                     <div
-                        v-if="msg.role === 'assistant' && Array.isArray(msg.thoughts) && msg.thoughts.length > 0"
+                        v-if="msg.role === 'assistant' && ((typeof msg.thoughtText === 'string' && msg.thoughtText.length > 0) || (Array.isArray(msg.thoughts) && msg.thoughts.length > 0))"
                         class="mb-3 rounded-xl border border-blue-500/20 bg-slate-900/70 px-4 py-3"
                     >
                         <div class="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-300/70">&lt;thought&gt;</div>
-                        <div class="whitespace-pre-wrap text-xs leading-6 text-slate-400">{{ msg.thoughts.join('\n\n') }}</div>
+                        <div class="whitespace-pre-wrap text-xs leading-6 text-slate-400">{{ (typeof msg.thoughtText === 'string' && msg.thoughtText.length > 0) ? msg.thoughtText : msg.thoughts.join('\n\n') }}</div>
                     </div>
                     <div class="whitespace-pre-wrap font-light tracking-wide">{{ msg.content }}</div>
                     </div>
@@ -664,6 +673,7 @@ const KNOWN_QUERY_KEYS = new Set([
     'maxTokens',
     'stream',
     'thinking',
+    'thinkingLevel',
     'thinkingBudget',
     'includeThoughts',
     'imageSize',
@@ -692,6 +702,7 @@ const DEFAULT_TEXT_PARAMS = Object.freeze({
     maxTokens: undefined,
     stream: true,
     thinkingEnabled: false,
+    thinkingLevel: 'LOW',
     thinkingBudget: 4096,
     includeThoughts: false
 });
@@ -730,6 +741,7 @@ const VIDEO_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'];
 const VIDEO_RESOLUTIONS = ['720p', '1080p'];
 const AUDIO_LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh'];
 const GEMINI_TTS_MODES = ['single', 'multi'];
+const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'];
 const MAX_MEDIA_ATTACHMENTS = 10;
 const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
 
@@ -759,6 +771,7 @@ const params = reactive({
     stream: DEFAULT_TEXT_PARAMS.stream,
     thinking: {
         enabled: DEFAULT_TEXT_PARAMS.thinkingEnabled,
+        level: DEFAULT_TEXT_PARAMS.thinkingLevel,
         budget: DEFAULT_TEXT_PARAMS.thinkingBudget,
         includeThoughts: DEFAULT_TEXT_PARAMS.includeThoughts
     }
@@ -799,6 +812,15 @@ const currentModelType = computed(() => {
 
 const supportsTextMedia = computed(() => {
     return currentModelType.value === 'text' && currentModel.value?.provider === 'google';
+});
+
+const supportsThinkingLevel = computed(() => {
+    if (currentModelType.value !== 'text' || currentModel.value?.provider !== 'google') {
+        return false;
+    }
+
+    const modelId = String(currentModel.value?.apiModelId || currentModel.value?.id || '').toLowerCase();
+    return /^gemini-3([.-]|$)/.test(modelId);
 });
 
 // Voices are now derived from the selected model's additions
@@ -931,7 +953,8 @@ const applyQueryToState = (query) => {
         params.maxTokens = parseIntegerQuery(toSingleQueryValue(query.maxTokens), 1);
         params.stream = parseBooleanQuery(toSingleQueryValue(query.stream)) ?? DEFAULT_TEXT_PARAMS.stream;
         params.thinking.enabled = parseBooleanQuery(toSingleQueryValue(query.thinking)) ?? DEFAULT_TEXT_PARAMS.thinkingEnabled;
-        params.thinking.budget = parseIntegerQuery(toSingleQueryValue(query.thinkingBudget), 1024) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
+        params.thinking.level = parseEnumQuery(toSingleQueryValue(query.thinkingLevel), THINKING_LEVELS) ?? DEFAULT_TEXT_PARAMS.thinkingLevel;
+        params.thinking.budget = parseIntegerQuery(toSingleQueryValue(query.thinkingBudget), -1) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
         params.thinking.includeThoughts = parseBooleanQuery(toSingleQueryValue(query.includeThoughts)) ?? DEFAULT_TEXT_PARAMS.includeThoughts;
 
         imageParams.size = parseEnumQuery(toSingleQueryValue(query.imageSize), IMAGE_SIZES) ?? DEFAULT_IMAGE_PARAMS.size;
@@ -1000,7 +1023,8 @@ const buildStateQuery = () => {
     const safeTemperature = parseNumberQuery(toStringValue(params.temperature), 0, 2) ?? DEFAULT_TEXT_PARAMS.temperature;
     const safeTopP = parseNumberQuery(toStringValue(params.topP), 0, 1) ?? DEFAULT_TEXT_PARAMS.topP;
     const safeMaxTokens = parseIntegerQuery(toStringValue(params.maxTokens), 1);
-    const safeThinkingBudget = parseIntegerQuery(toStringValue(params.thinking.budget), 1024) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
+    const safeThinkingLevel = parseEnumQuery(toStringValue(params.thinking.level), THINKING_LEVELS) ?? DEFAULT_TEXT_PARAMS.thinkingLevel;
+    const safeThinkingBudget = parseIntegerQuery(toStringValue(params.thinking.budget), -1) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
 
     const safeImageSize = parseEnumQuery(toStringValue(imageParams.size), IMAGE_SIZES) ?? DEFAULT_IMAGE_PARAMS.size;
     const safeImageAspectRatio = parseEnumQuery(toStringValue(imageParams.aspectRatio), IMAGE_ASPECT_RATIOS) ?? DEFAULT_IMAGE_PARAMS.aspectRatio;
@@ -1028,7 +1052,6 @@ const buildStateQuery = () => {
         topP: String(safeTopP),
         stream: String(Boolean(params.stream)),
         thinking: String(Boolean(params.thinking.enabled)),
-        thinkingBudget: String(safeThinkingBudget),
         includeThoughts: String(Boolean(params.thinking.includeThoughts)),
         imageSize: safeImageSize,
         imageAspectRatio: safeImageAspectRatio,
@@ -1049,6 +1072,12 @@ const buildStateQuery = () => {
 
     if (safeMaxTokens !== undefined) {
         query.maxTokens = String(safeMaxTokens);
+    }
+
+    if (supportsThinkingLevel.value) {
+        query.thinkingLevel = safeThinkingLevel;
+    } else {
+        query.thinkingBudget = String(safeThinkingBudget);
     }
 
     const activeImageMode = getImageModeForModel(currentModel.value);
@@ -1107,6 +1136,7 @@ watch(
         params.maxTokens,
         params.stream,
         params.thinking.enabled,
+        params.thinking.level,
         params.thinking.budget,
         params.thinking.includeThoughts,
         imageParams.size,
@@ -1363,6 +1393,7 @@ const buildAssistantMessageFromRunResponse = (data) => {
         parts,
         provider_state: providerState,
         thoughts: extractThoughtTexts(parts),
+        thoughtText: '',
         tool_calls: Array.isArray(message.tool_calls)
             ? message.tool_calls
             : (Array.isArray(message.toolCalls) ? message.toolCalls : []),
@@ -1405,7 +1436,7 @@ const sendMessage = async () => {
 
   try {
     const mediaPayload = await buildMediaPayload(pendingAttachments);
-    const shouldStream = params.stream && mediaPayload.length === 0 && !params.thinking.enabled;
+    const shouldStream = params.stream && mediaPayload.length === 0;
 
     const payload = {
         model: selectedModel.value,
@@ -1424,9 +1455,14 @@ const sendMessage = async () => {
 
     if (params.thinking.enabled) {
         payload.thinking = {
-            budget: params.thinking.budget,
             includeThoughts: params.thinking.includeThoughts
         };
+
+        if (supportsThinkingLevel.value) {
+            payload.thinking.level = params.thinking.level;
+        } else {
+            payload.thinking.budget = params.thinking.budget;
+        }
     }
 
     if (shouldStream) {
@@ -1440,11 +1476,13 @@ const sendMessage = async () => {
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let sseBuffer = '';
         
         messages.value.push({
             role: 'assistant',
             content: '',
             thoughts: [],
+            thoughtText: '',
             parts: [],
             provider_state: null,
             isError: false
@@ -1455,22 +1493,38 @@ const sendMessage = async () => {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
+            sseBuffer += decoder.decode(value, { stream: true });
+            const frames = sseBuffer.split('\n\n');
+            sseBuffer = frames.pop() || '';
 
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const dataStr = line.slice(6).trim();
-                    if (dataStr === '[DONE]') break;
-                    try {
-                        const data = JSON.parse(dataStr);
-                        if (data.error) {
-                             messages.value[lastIdx].content += `\n[Error: ${data.error}]`;
-                             messages.value[lastIdx].isError = true;
-                        } else if (data.content) {
-                            messages.value[lastIdx].content += data.content;
-                        }
-                    } catch (e) { }
+            for (const frame of frames) {
+                const lines = frame.split('\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6).trim();
+                        if (dataStr === '[DONE]') break;
+                        try {
+                            const data = JSON.parse(dataStr);
+                            if (data.error) {
+                                 messages.value[lastIdx].content += `\n[Error: ${data.error}]`;
+                                 messages.value[lastIdx].isError = true;
+                            }
+                            if (data.content) {
+                                messages.value[lastIdx].content += data.content;
+                            }
+                            if (data.thought) {
+                                messages.value[lastIdx].thoughtText += data.thought;
+                            }
+                            if (data.provider_state) {
+                                messages.value[lastIdx].provider_state = data.provider_state;
+                                if (Array.isArray(data.provider_state.parts)) {
+                                    messages.value[lastIdx].parts = data.provider_state.parts;
+                                    messages.value[lastIdx].thoughts = extractThoughtTexts(data.provider_state.parts);
+                                }
+                            }
+                        } catch (e) { }
+                    }
                 }
             }
         }
