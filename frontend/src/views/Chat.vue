@@ -442,7 +442,126 @@
 
          <!-- IMAGE MODE -->
          <template v-else-if="currentModelType === 'image'">
-             <div class="flex-1 overflow-y-auto p-8 custom-scrollbar">
+             <template v-if="supportsNanoBananaChat">
+                 <div class="flex-1 relative flex flex-col min-h-0 bg-slate-900">
+                    <div ref="imageChatContainer" class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar pb-36">
+                        <div v-if="imageChatMessages.length === 0" class="h-full flex flex-col items-center justify-center text-slate-500 space-y-4">
+                            <div class="p-6 rounded-2xl bg-slate-800/30 border border-slate-800 shadow-xl max-w-xl text-center">
+                                <p class="text-lg font-medium text-slate-300 mb-2">Nano Banana Chat</p>
+                                <p class="text-sm leading-6 text-slate-500">Ask for an image, then continue the conversation. Generated images stay in the conversation state automatically.</p>
+                                <p class="mt-4 text-xs text-slate-600">{{ imageParams.size }} / {{ imageParams.aspectRatio }}</p>
+                            </div>
+                        </div>
+
+                        <div
+                            v-for="(msg, index) in imageChatMessages"
+                            :key="`image-chat-${index}`"
+                            :class="['flex w-full animate-in fade-in slide-in-from-bottom-2 duration-300', msg.role === 'user' ? 'justify-end' : 'justify-start']"
+                        >
+                            <div
+                                :class="[
+                                    'max-w-[88%] rounded-2xl px-5 py-4 text-sm leading-7 shadow-md break-words',
+                                    msg.role === 'user'
+                                        ? 'bg-emerald-600 text-white rounded-tr-none'
+                                        : (msg.isError ? 'bg-red-900/40 text-red-200 border border-red-800' : 'bg-slate-800 text-slate-200 border border-slate-700/80') + ' rounded-tl-none'
+                                ]"
+                            >
+                                <div v-if="msg.role === 'assistant' && !msg.isError && !msg.content && (!Array.isArray(msg.images) || msg.images.length === 0)" class="text-slate-400 italic">
+                                    Generating image...
+                                </div>
+
+                                <div v-if="msg.role === 'user' && Array.isArray(msg.attachments) && msg.attachments.length > 0" class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div v-for="attachment in msg.attachments" :key="attachment.id || attachment.name" class="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-2">
+                                        <img :src="attachment.previewUrl" class="w-full rounded-lg border border-emerald-200/10 object-contain max-h-[240px] bg-slate-950/40" />
+                                        <div class="mt-2 text-[11px] text-emerald-100/80 truncate">{{ attachment.name }}</div>
+                                    </div>
+                                </div>
+
+                                <div v-if="msg.role === 'assistant' && Array.isArray(msg.images) && msg.images.length > 0" class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div v-for="(img, imgIdx) in msg.images" :key="img.fileName + imgIdx" class="rounded-xl border border-slate-700 bg-slate-900/40 p-2">
+                                        <img :src="img.dataUrl" class="w-full rounded-lg border border-slate-700/70 object-contain max-h-[320px] bg-slate-950/40" />
+                                        <div class="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                                            <span>{{ img.mimeType }}</span>
+                                            <a :href="img.dataUrl" :download="img.fileName" class="text-emerald-400 hover:text-emerald-300">Download</a>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="msg.content" class="whitespace-pre-wrap font-light tracking-wide">{{ msg.content }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 bg-slate-900 border-t border-slate-800/50 absolute bottom-0 left-0 right-0 z-10 backdrop-blur-md bg-opacity-95">
+                        <div class="max-w-4xl mx-auto relative group">
+                            <input
+                                ref="imageChatMediaPicker"
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                class="hidden"
+                                @change="onImageChatFilesSelected"
+                            >
+
+                            <div v-if="imageChatAttachments.length > 0" class="mb-2 flex flex-wrap gap-2">
+                                <span
+                                    v-for="(file, fileIndex) in imageChatAttachments"
+                                    :key="file.id"
+                                    class="inline-flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-[11px] text-slate-200"
+                                >
+                                    <span>Image</span>
+                                    <span class="text-slate-500">-</span>
+                                    <span class="truncate max-w-[200px]">{{ file.name }}</span>
+                                    <button
+                                        @click="removeImageChatAttachment(fileIndex)"
+                                        type="button"
+                                        class="ml-1 text-slate-400 hover:text-slate-200"
+                                        :disabled="isGenerating"
+                                    >
+                                        x
+                                    </button>
+                                </span>
+                            </div>
+
+                            <textarea
+                                v-model="imageChatInput"
+                                @keydown="handleImageChatTextareaKeydown"
+                                placeholder="Describe a new image or ask to edit the previous result..."
+                                class="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 pr-32 text-sm focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 outline-none resize-none min-h-[60px] max-h-[200px] shadow-lg transition-all text-slate-200 placeholder:text-slate-600"
+                                :disabled="isGenerating"
+                            ></textarea>
+
+                            <div class="absolute bottom-3 right-3 flex items-center gap-2">
+                                <button
+                                    @click="openImageChatMediaPicker"
+                                    type="button"
+                                    :disabled="isGenerating || imageChatAttachments.length >= MAX_MEDIA_ATTACHMENTS"
+                                    class="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 p-2 rounded-lg transition-all shadow-md flex items-center justify-center"
+                                    title="Attach reference images"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7.414a2 2 0 00-.586-1.414l-3.414-3.414A2 2 0 0012.586 2H4zm8 1.414V7a1 1 0 001 1h2.586L12 4.414zM5 12a1 1 0 011.447-.894L8 11.764l1.553-2.658a1 1 0 011.741-.02l1.638 2.73 1.361-.68A1 1 0 0116 12v2a1 1 0 01-1 1H5a1 1 0 01-1-1v-2z" clip-rule="evenodd" />
+                                    </svg>
+                                </button>
+                                <button
+                                    @click="sendNanoBananaMessage"
+                                    :disabled="(!imageChatInput.trim() && imageChatAttachments.length === 0) || isGenerating"
+                                    class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white p-2 rounded-lg transition-all shadow-md flex items-center justify-center"
+                                >
+                                    <svg v-if="!isGenerating" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                                    </svg>
+                                    <svg v-else class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                 </div>
+             </template>
+             <div v-else class="flex-1 overflow-y-auto p-8 custom-scrollbar">
                 <div class="max-w-4xl mx-auto space-y-8">
                     
                     <!-- Input Section -->
@@ -748,10 +867,14 @@ const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
 const input = ref('');
 const ttsInput = ref('');
 const imageInput = ref('');
+const imageChatInput = ref('');
 const videoInput = ref('');
 const mediaPicker = ref(null);
+const imageChatMediaPicker = ref(null);
 const attachedMedia = ref([]);
+const imageChatAttachments = ref([]);
 const messages = ref([]);
+const imageChatMessages = ref([]);
 const audioResults = ref([]);
 const imageResults = ref([]);
 const videoResults = ref([]);
@@ -760,6 +883,7 @@ const selectedModel = ref('');
 const isGenerating = ref(false);
 const loadingModels = ref(true);
 const chatContainer = ref(null);
+const imageChatContainer = ref(null);
 const isApplyingQueryState = ref(false);
 const isUrlSyncReady = ref(false);
 
@@ -831,6 +955,12 @@ const voices = computed(() => {
 const currentImageMode = computed(() => {
     if (currentModelType.value !== 'image') return undefined;
     return currentModel.value?.additions?.imageMode || currentModel.value?.imageMode || 'imagen';
+});
+
+const supportsNanoBananaChat = computed(() => {
+    return currentModelType.value === 'image'
+        && currentImageMode.value === 'nano-banana'
+        && currentModel.value?.provider === 'google';
 });
 
 const imageModeLabel = computed(() => {
@@ -1118,7 +1248,15 @@ const scrollToBottom = async () => {
   }
 };
 
+const scrollImageChatToBottom = async () => {
+  await nextTick();
+  if (imageChatContainer.value) {
+    imageChatContainer.value.scrollTop = imageChatContainer.value.scrollHeight;
+  }
+};
+
 watch(messages, () => scrollToBottom(), { deep: true });
+watch(imageChatMessages, () => scrollImageChatToBottom(), { deep: true });
 
 watch(
     () => route.query,
@@ -1202,6 +1340,15 @@ watch(
 );
 
 watch(
+    supportsNanoBananaChat,
+    (enabled) => {
+        if (!enabled && imageChatAttachments.value.length > 0) {
+            clearImageChatAttachments();
+        }
+    }
+);
+
+watch(
     currentAudioMode,
     (mode) => {
         if (mode !== 'gemini-tts') return;
@@ -1257,6 +1404,56 @@ const clearAttachedMedia = () => {
     attachedMedia.value = [];
     if (mediaPicker.value) {
         mediaPicker.value.value = '';
+    }
+};
+
+const openImageChatMediaPicker = () => {
+    if (isGenerating.value || !supportsNanoBananaChat.value) return;
+    imageChatMediaPicker.value?.click();
+};
+
+const removeImageChatAttachment = (fileIndex) => {
+    imageChatAttachments.value.splice(fileIndex, 1);
+};
+
+const clearImageChatAttachments = () => {
+    imageChatAttachments.value = [];
+    if (imageChatMediaPicker.value) {
+        imageChatMediaPicker.value.value = '';
+    }
+};
+
+const onImageChatFilesSelected = (event) => {
+    const fileList = Array.from(event?.target?.files || []);
+    if (fileList.length === 0) {
+        return;
+    }
+
+    const slotsLeft = Math.max(0, MAX_MEDIA_ATTACHMENTS - imageChatAttachments.value.length);
+    const accepted = [];
+
+    for (const file of fileList.slice(0, slotsLeft)) {
+        if (!file.type.toLowerCase().startsWith('image/')) {
+            continue;
+        }
+
+        accepted.push({
+            id: `image-chat-${Date.now()}-${accepted.length}`,
+            file,
+            name: file.name || `image-${accepted.length + 1}`,
+            mimeType: file.type || 'image/png',
+            kind: 'image'
+        });
+    }
+
+    if (accepted.length === 0) {
+        alert('Nano Banana chat supports image attachments only.');
+    } else {
+        imageChatAttachments.value.push(...accepted);
+    }
+
+    if (event?.target) {
+        event.target.value = '';
     }
 };
 
@@ -1331,6 +1528,20 @@ const buildMediaPayload = async (files) => {
     })));
 };
 
+const stripDataUrlPrefix = (value) => {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    const trimmed = value.trim();
+    const commaIndex = trimmed.indexOf(',');
+    if (trimmed.startsWith('data:') && commaIndex !== -1) {
+        return trimmed.slice(commaIndex + 1);
+    }
+
+    return trimmed;
+};
+
 const extractThoughtTexts = (parts) => {
     if (!Array.isArray(parts)) {
         return [];
@@ -1401,11 +1612,77 @@ const buildAssistantMessageFromRunResponse = (data) => {
     };
 };
 
+const normalizeReturnedImages = (images, fallbackMimeType = 'image/png') => {
+    return (images || []).map((img, idx) => {
+        const mimeType = img.mimeType || fallbackMimeType;
+        return {
+            mimeType,
+            dataUrl: `data:${mimeType};base64,${img.data}`,
+            fileName: `image_${Date.now()}_${idx + 1}.${mimeToExtension(mimeType)}`
+        };
+    });
+};
+
+const buildNanoBananaUserMessage = ({ text, mediaPayload }) => {
+    const trimmedText = text.trim();
+    const inlineImageParts = mediaPayload.map((item) => ({
+        inlineData: {
+            mimeType: item.mimeType,
+            data: stripDataUrlPrefix(item.data)
+        }
+    }));
+    const parts = [
+        ...inlineImageParts,
+        ...(trimmedText ? [{ text: trimmedText }] : [])
+    ];
+
+    return {
+        role: 'user',
+        content: trimmedText,
+        parts,
+        attachments: mediaPayload.map((item, index) => ({
+            id: `image-chat-preview-${Date.now()}-${index}`,
+            name: item.name,
+            mimeType: item.mimeType,
+            previewUrl: item.data
+        }))
+    };
+};
+
+const buildNanoBananaAssistantMessage = (data) => {
+    const message = data?.message && typeof data.message === 'object' ? data.message : {};
+    const parts = Array.isArray(message.parts)
+        ? message.parts
+        : (Array.isArray(data?.provider_state?.parts) ? data.provider_state.parts : []);
+    const providerState = data?.provider_state
+        ?? message.provider_state
+        ?? message.providerState
+        ?? (parts.length > 0 ? { role: 'model', parts } : null);
+
+    return {
+        role: 'assistant',
+        content: typeof message.content === 'string'
+            ? message.content
+            : (typeof data?.metadata?.text === 'string' ? data.metadata.text : ''),
+        images: normalizeReturnedImages(data?.images, imageParams.format || 'image/png'),
+        parts,
+        provider_state: providerState,
+        isError: false
+    };
+};
+
 const handleTextareaKeydown = (event) => {
     if (event.key !== 'Enter') return;
     if (event.shiftKey) return;
     event.preventDefault();
     sendMessage();
+};
+
+const handleImageChatTextareaKeydown = (event) => {
+    if (event.key !== 'Enter') return;
+    if (event.shiftKey) return;
+    event.preventDefault();
+    sendNanoBananaMessage();
 };
 
 const sendMessage = async () => {
@@ -1555,6 +1832,62 @@ const buildImageSummary = () => {
 
 const buildVideoSummary = () => {
     return `${videoParams.resolution} / ${videoParams.aspectRatio} / ${videoParams.durationSeconds}s / ${videoParams.count}x`;
+};
+
+const sendNanoBananaMessage = async () => {
+    if ((!imageChatInput.value.trim() && imageChatAttachments.value.length === 0) || isGenerating.value) return;
+    if (!supportsNanoBananaChat.value) return;
+
+    isGenerating.value = true;
+
+    try {
+        const pendingAttachments = imageChatAttachments.value.map((item) => ({ ...item }));
+        const mediaPayload = await buildMediaPayload(pendingAttachments);
+        const hasUnsupportedAttachment = mediaPayload.some((item) => !item.mimeType.toLowerCase().startsWith('image/'));
+
+        if (hasUnsupportedAttachment) {
+            throw new Error('Nano Banana chat supports image attachments only');
+        }
+
+        const userMessage = buildNanoBananaUserMessage({
+            text: imageChatInput.value,
+            mediaPayload
+        });
+
+        imageChatInput.value = '';
+        clearImageChatAttachments();
+        imageChatMessages.value.push(userMessage);
+
+        const payload = {
+            model: selectedModel.value,
+            messages: imageChatMessages.value
+                .filter((message) => !message.isError)
+                .map((message) => serializeChatMessageForRequest(message)),
+            image: {
+                size: imageParams.size,
+                aspectRatio: imageParams.aspectRatio
+            },
+            stream: false
+        };
+
+        const res = await axios.post('/run', payload);
+
+        if (res.data.type !== 'image') {
+            throw new Error('Unexpected response type from Nano Banana');
+        }
+
+        imageChatMessages.value.push(buildNanoBananaAssistantMessage(res.data));
+    } catch (e) {
+        console.error('Nano Banana chat failed', e);
+        imageChatMessages.value.push({
+            role: 'assistant',
+            content: `Error: ${e.response?.data?.error || e.message}`,
+            images: [],
+            isError: true
+        });
+    } finally {
+        isGenerating.value = false;
+    }
 };
 
 const generateImage = async () => {

@@ -1285,23 +1285,33 @@ export class GoogleAdapter extends BaseAdapter {
     return Number((pcmBuffer.length / bytesPerSecond).toFixed(2));
   }
 
-  async generateImage({ model, prompt, messages, image, imageMode }) {
+  async generateImage({ model, prompt, messages, media, image, imageMode }) {
     if (!this.imageAI) {
       throw new Error('Google image generation requires a valid API key');
-    }
-
-    const promptText = prompt || messages?.[messages.length - 1]?.content;
-    if (!promptText) {
-      throw new Error('No prompt provided for image generation');
     }
 
     const resolvedMode = imageMode || (model.includes('imagen') ? 'imagen' : 'nano-banana');
 
     if (resolvedMode === 'imagen') {
+      const promptText = prompt || messages?.[messages.length - 1]?.content;
+      if (!promptText) {
+        throw new Error('No prompt provided for image generation');
+      }
       return this.generateImagenImages({ model, prompt: promptText, imageOptions: image });
     }
 
-    return this.generateGeminiImages({ model, prompt: promptText, imageOptions: image, imageMode: resolvedMode });
+    if (!prompt && (!Array.isArray(messages) || messages.length === 0)) {
+      throw new Error('Nano Banana image generation requires a prompt or conversation history');
+    }
+
+    return this.generateGeminiImages({
+      model,
+      prompt,
+      messages,
+      media,
+      imageOptions: image,
+      imageMode: resolvedMode
+    });
   }
 
   async generateImagenImages({ model, prompt, imageOptions }) {
@@ -1351,7 +1361,7 @@ export class GoogleAdapter extends BaseAdapter {
     };
   }
 
-  async generateGeminiImages({ model, prompt, imageOptions, imageMode }) {
+  async generateGeminiImages({ model, prompt, messages, media, imageOptions, imageMode }) {
     const imageSize = imageOptions?.size || '1K';
     const aspectRatio = imageOptions?.aspectRatio;
     const supportsImageSize = !model.includes('gemini-2.5-flash-image');
@@ -1368,26 +1378,35 @@ export class GoogleAdapter extends BaseAdapter {
         config.imageConfig.aspectRatio = aspectRatio;
       }
     }
-    const contents = [
-      {
-        role: 'user',
-        parts: [
-          { text: prompt }
-        ]
-      }
-    ];
+    const { contents, systemInstruction } = await this.buildGeminiRequestContents({
+      prompt,
+      messages,
+      media
+    });
 
     const response = await this.imageAI.models.generateContentStream({
       model,
-      config,
+      config: this.removeUndefined({
+        ...config,
+        systemInstruction
+      }),
       contents
     });
 
     const images = [];
     let trailingText = '';
+    const responseParts = [];
+    let responseRole = 'model';
 
     for await (const chunk of response) {
-      const parts = chunk?.candidates?.[0]?.content?.parts || [];
+      const candidateContent = chunk?.candidates?.[0]?.content;
+      const parts = this.cloneParts(candidateContent?.parts);
+      responseRole = candidateContent?.role || responseRole;
+
+      if (parts.length > 0) {
+        responseParts.push(...parts);
+      }
+
       for (const part of parts) {
         if (part?.inlineData?.data) {
           images.push({
@@ -1404,9 +1423,24 @@ export class GoogleAdapter extends BaseAdapter {
       throw new Error('No images generated.');
     }
 
+    const providerState = responseParts.length > 0
+      ? {
+          role: responseRole,
+          parts: responseParts
+        }
+      : null;
+
     return {
       type: 'image',
       images,
+      parts: responseParts,
+      providerState,
+      message: {
+        role: 'assistant',
+        content: trailingText || '',
+        parts: responseParts,
+        providerState
+      },
       metadata: {
         mode: imageMode || 'nano-banana',
         model,

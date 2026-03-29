@@ -566,6 +566,8 @@ router.post('/run', async (req, res) => {
               res.json({
                   type: 'image',
                   images: response.images,
+                  message: response.message || null,
+                  provider_state: response.providerState || response.message?.providerState || response.message?.provider_state || null,
                   metadata: response.metadata || {}
               });
           } else {
