@@ -781,6 +781,7 @@ import { ref, onMounted, nextTick, watch, reactive, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import Header from '../components/Header.vue';
+import { fetchWithAccessKey } from '../auth';
 
 const route = useRoute();
 const router = useRouter();
@@ -1743,7 +1744,7 @@ const sendMessage = async () => {
     }
 
     if (shouldStream) {
-        const response = await fetch('/run', {
+        const response = await fetchWithAccessKey('/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

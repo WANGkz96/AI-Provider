@@ -5,6 +5,10 @@ import apiRoutes from './routes/api.js';
 import { config } from './config/models.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  applySecurityHeaders,
+  buildCorsOptions
+} from './security.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,8 +21,12 @@ const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || '300mb';
 const serverRequestTimeoutMs = config.serverRequestTimeoutMs;
 const serverHeadersTimeoutMs = Math.max(config.serverHeadersTimeoutMs, serverRequestTimeoutMs + 1000);
 
+app.disable('x-powered-by');
+app.set('trust proxy', config.trustProxy);
+
 // Middleware
-app.use(cors());
+app.use(applySecurityHeaders);
+app.use(cors(buildCorsOptions(config)));
 app.use(express.json({ limit: requestBodyLimit }));
 
 // API Routes

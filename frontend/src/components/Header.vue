@@ -22,6 +22,7 @@
             Chat
         </router-link>
         <router-link 
+            v-if="showConfigLink"
             to="/config" 
             class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
             :class="$route.path === '/config' ? 'text-blue-400 bg-blue-900/20' : 'text-slate-400 hover:text-slate-200'"
@@ -38,5 +39,6 @@
 </template>
 
 <script setup>
+const showConfigLink = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 </script>
 

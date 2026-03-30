@@ -40,6 +40,74 @@ const parseNonNegativeIntEnv = (name, fallback) => {
   return parsedValue;
 };
 
+const parseOptionalPositiveIntEnv = (name, fallback) => {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue === '') {
+    return fallback;
+  }
+
+  const parsedValue = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsedValue)) {
+    console.warn(`Invalid ${name}='${rawValue}', using ${fallback}`);
+    return fallback;
+  }
+
+  return parsedValue > 0 ? parsedValue : 0;
+};
+
+const parseBooleanEnv = (name, fallback = false) => {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue === '') {
+    return fallback;
+  }
+
+  return /^(1|true|yes|on)$/i.test(rawValue);
+};
+
+const parseCsvEnv = (name) => {
+  const rawValue = process.env[name];
+  if (!rawValue) {
+    return [];
+  }
+
+  return rawValue
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+};
+
+const parseTrustProxyEnv = (name) => {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue === '') {
+    return false;
+  }
+
+  if (/^(1|true|yes|on)$/i.test(rawValue)) {
+    return true;
+  }
+
+  if (/^(0|false|no|off)$/i.test(rawValue)) {
+    return false;
+  }
+
+  const numericValue = Number.parseInt(rawValue, 10);
+  if (Number.isFinite(numericValue) && numericValue >= 0) {
+    return numericValue;
+  }
+
+  return rawValue;
+};
+
+const resolveProjectPath = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  return path.isAbsolute(value)
+    ? path.resolve(value)
+    : path.resolve(PROJECT_ROOT, value);
+};
+
 /**
  * Reads configured models from models.json
  */
@@ -86,5 +154,20 @@ export const config = {
   groqApiKey: process.env.GROQ_API_KEY,
   dockerHost: process.env.DOCKER_HOST_URL || 'http://localhost',
   serverRequestTimeoutMs: parsePositiveIntEnv('SERVER_REQUEST_TIMEOUT_MS', 20 * 60 * 1000),
-  serverHeadersTimeoutMs: parsePositiveIntEnv('SERVER_HEADERS_TIMEOUT_MS', 21 * 60 * 1000)
+  serverHeadersTimeoutMs: parsePositiveIntEnv('SERVER_HEADERS_TIMEOUT_MS', 21 * 60 * 1000),
+  trustProxy: parseTrustProxyEnv('TRUST_PROXY'),
+  corsAllowedOrigins: parseCsvEnv('CORS_ALLOWED_ORIGINS'),
+  corsAllowNoOrigin: parseBooleanEnv('CORS_ALLOW_NO_ORIGIN', true),
+  enforceAuthentication: parseBooleanEnv('ENFORCE_AUTHENTICATION', process.env.NODE_ENV === 'production'),
+  protectHealthEndpoint: parseBooleanEnv('PROTECT_HEALTH_ENDPOINT', false),
+  basicAuthUsername: process.env.BASIC_AUTH_USERNAME || '',
+  basicAuthPassword: process.env.BASIC_AUTH_PASSWORD || '',
+  apiKey: process.env.AI_PROVIDER_API_KEY || '',
+  enableConfigRoutes: parseBooleanEnv('ENABLE_CONFIG_ROUTES', false),
+  enableAudioProxy: parseBooleanEnv('ENABLE_AUDIO_PROXY', false),
+  audioProxyRoot: resolveProjectPath(process.env.AUDIO_PROXY_ROOT),
+  runRateLimitWindowMs: parsePositiveIntEnv('RUN_RATE_LIMIT_WINDOW_MS', 60 * 1000),
+  runRateLimitMax: parseOptionalPositiveIntEnv('RUN_RATE_LIMIT_MAX', 30),
+  runConcurrencyLimit: parseOptionalPositiveIntEnv('RUN_CONCURRENCY_LIMIT', 2),
+  maxGenerationTokens: parseOptionalPositiveIntEnv('MAX_GENERATION_TOKENS', 4096)
 };
