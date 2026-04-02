@@ -215,6 +215,7 @@ Notes:
 - Existing requests with `maxTokens`, plain `messages`, `prompt`, and legacy `responseMimeType` / `responseSchema` continue to work.
 - For Gemini 3 multi-step tool calling, send `message.parts` or `message.provider_state.parts` back exactly as received from the previous assistant response so thought signatures are preserved.
 - `stream: false` is required when using `output`, `tools`, `tool_choice`, assistant `tool_calls`, or `tool` messages.
+- Server-side output token clamping is disabled by default. If `MAX_GENERATION_TOKENS` is set in the server environment, `/run` applies it as a global safety cap and exposes both `requestedMaxTokens` and `appliedMaxTokens` in response metadata.
 
 #### 2026 Update: Streaming Thought/Content Payloads
 

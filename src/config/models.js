@@ -169,5 +169,5 @@ export const config = {
   runRateLimitWindowMs: parsePositiveIntEnv('RUN_RATE_LIMIT_WINDOW_MS', 60 * 1000),
   runRateLimitMax: parseOptionalPositiveIntEnv('RUN_RATE_LIMIT_MAX', 30),
   runConcurrencyLimit: parseOptionalPositiveIntEnv('RUN_CONCURRENCY_LIMIT', 2),
-  maxGenerationTokens: parseOptionalPositiveIntEnv('MAX_GENERATION_TOKENS', 4096)
+  maxGenerationTokens: parseOptionalPositiveIntEnv('MAX_GENERATION_TOKENS', 0)
 };
