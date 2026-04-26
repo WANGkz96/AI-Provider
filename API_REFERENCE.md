@@ -65,8 +65,9 @@
 | `stream` | boolean | No | Включить стриминг ответов (SSE). Default: `false`. Для обычного text streaming сервер может слать отдельные SSE payload fields `content`, `thought` и финальный `provider_state`. |
 | `temperature` | number | No | Креативность / sampling temperature (0.0 - 2.0). Отправляется в поддерживающие модели, включая Vertex Gemini text generation. |
 | `topP` | number | No | Nucleus sampling (0.0 - 1.0). |
-| `maxTokens` | number | No | Максимальное количество токенов в ответе. Alias: `max_tokens`. |
+| `maxTokens` | number | No | Максимальное количество токенов в ответе. Alias: `max_tokens`. Если поле не передано, сервер использует свой default budget. |
 | `thinking` | object | No | **(New)** Настройки мышления (Reasoning). Для Gemini 3 / 3.1 используйте `thinking.level`, для Gemini 2.5 и старее `thinking.budget`. |
+| `responseJsonSchema` | object | No | Legacy/compat structured-output field for Gemini JSON schema requests. |
 | `tts` | object | No | **(New)** Настройки Text-to-Speech для моделей `type=audio` (Chatterbox / Gemini TTS). |
 | `image` | object | No | **(New)** Параметры генерации изображений. |
 | `video` | object | No | **(New)** Параметры генерации видео. |
@@ -212,10 +213,10 @@ Text responses keep the legacy fields and also include agent-friendly fields:
 
 Notes:
 - All new fields are optional.
-- Existing requests with `maxTokens`, plain `messages`, `prompt`, and legacy `responseMimeType` / `responseSchema` continue to work.
+- Existing requests with `maxTokens`, plain `messages`, `prompt`, and legacy `responseMimeType` / `responseSchema` / `responseJsonSchema` continue to work.
 - For Gemini 3 multi-step tool calling, send `message.parts` or `message.provider_state.parts` back exactly as received from the previous assistant response so thought signatures are preserved.
 - `stream: false` is required when using `output`, `tools`, `tool_choice`, assistant `tool_calls`, or `tool` messages.
-- Server-side output token clamping is disabled by default. If `MAX_GENERATION_TOKENS` is set in the server environment, `/run` applies it as a global safety cap and exposes both `requestedMaxTokens` and `appliedMaxTokens` in response metadata.
+- If the client omits `maxTokens`, `/run` uses the server default budget (`DEFAULT_GENERATION_TOKENS`, legacy alias `MAX_GENERATION_TOKENS`). If `MAX_GENERATION_TOKENS_HARD_CAP` is set, `/run` clamps the final budget to that hard cap and exposes `requestedMaxTokens`, `defaultMaxTokens`, `appliedMaxTokens`, and `hardCapMaxTokens` in response metadata.
 
 #### 2026 Update: Streaming Thought/Content Payloads
 
@@ -666,4 +667,3 @@ data: {"error": "Описание ошибки"}
 - `Shift + Enter` добавляет перенос строки без отправки.
 - Добавлена кнопка вложений (image/video/audio, множественный выбор до 10 файлов на запрос).
 - Для `type=audio` доступен выбор режима TTS: Chatterbox или Gemini TTS (single/multi speaker, выбор голосов).
-

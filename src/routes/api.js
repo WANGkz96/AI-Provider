@@ -143,6 +143,7 @@ const runSchema = z.object({
   }).optional(),
   responseMimeType: z.enum(['text/plain', 'application/json']).optional(),
   responseSchema: z.record(z.string(), z.any()).optional(),
+  responseJsonSchema: z.any().optional(),
   strictJson: z.boolean().optional(),
   output: outputSchema.optional(),
   tools: z.array(toolSchema).max(128).optional(),
@@ -462,9 +463,16 @@ router.get('/audio-proxy', requireAccessKey, (req, res) => {
 router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, async (req, res) => {
   try {
     const body = runSchema.parse(req.body);
-    const resolvedMaxTokens = body.maxTokens ?? body.max_tokens;
-    const appliedMaxTokens = config.maxGenerationTokens > 0
-      ? Math.min(resolvedMaxTokens ?? config.maxGenerationTokens, config.maxGenerationTokens)
+    const requestedMaxTokens = body.maxTokens ?? body.max_tokens;
+    const defaultMaxTokens = config.defaultGenerationTokens > 0
+      ? config.defaultGenerationTokens
+      : undefined;
+    const hardCapMaxTokens = config.maxGenerationTokensHardCap > 0
+      ? config.maxGenerationTokensHardCap
+      : undefined;
+    const resolvedMaxTokens = requestedMaxTokens ?? defaultMaxTokens;
+    const appliedMaxTokens = hardCapMaxTokens
+      ? Math.min(resolvedMaxTokens ?? hardCapMaxTokens, hardCapMaxTokens)
       : resolvedMaxTokens;
     const resolvedResponseMimeType = body.output?.type === 'json_schema'
       ? 'application/json'
@@ -474,7 +482,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       : body.responseSchema;
     const resolvedResponseJsonSchema = body.output?.type === 'json_schema'
       ? body.output.schema
-      : undefined;
+      : body.responseJsonSchema;
     const resolvedStrictJson = body.strictJson ?? (body.output?.type === 'json_schema' ? true : undefined);
 
     const models = getConfiguredModels();
@@ -669,8 +677,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
                 blockedReason: normalized.blockedReason,
                 truncated,
                 metadata: {
-                  requestedMaxTokens: resolvedMaxTokens ?? null,
+                  requestedMaxTokens: requestedMaxTokens ?? null,
+                  defaultMaxTokens: defaultMaxTokens ?? null,
                   appliedMaxTokens: appliedMaxTokens ?? null,
+                  hardCapMaxTokens: hardCapMaxTokens ?? null,
                   responseMimeType: resolvedResponseMimeType,
                   responseSchemaProvided: !!(resolvedResponseSchema || resolvedResponseJsonSchema),
                   strictJson
@@ -703,8 +713,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             blockedReason: normalized.blockedReason,
             truncated,
             metadata: {
-              requestedMaxTokens: resolvedMaxTokens ?? null,
+              requestedMaxTokens: requestedMaxTokens ?? null,
+              defaultMaxTokens: defaultMaxTokens ?? null,
               appliedMaxTokens: appliedMaxTokens ?? null,
+              hardCapMaxTokens: hardCapMaxTokens ?? null,
               responseMimeType: resolvedResponseMimeType || 'text/plain',
               responseSchemaProvided: !!(resolvedResponseSchema || resolvedResponseJsonSchema),
               strictJson,
