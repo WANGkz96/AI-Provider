@@ -601,14 +601,25 @@ export class GoogleAdapter extends BaseAdapter {
         const parts = cloneParts(candidateContent?.parts);
         const content = extractChunkText(chunk);
         const thought = extractThoughtText(chunk);
+        const usage = chunk?.usageMetadata
+          ? {
+              inputTokens: chunk.usageMetadata.promptTokenCount ?? null,
+              outputTokens: chunk.usageMetadata.candidatesTokenCount ?? null,
+              totalTokens: chunk.usageMetadata.totalTokenCount ?? null,
+              raw: chunk.usageMetadata
+            }
+          : null;
+        const finishReason = chunk?.candidates?.[0]?.finishReason ?? null;
 
-        if (content || thought || parts.length > 0) {
+        if (content || thought || parts.length > 0 || usage || finishReason) {
           yield {
             text: () => content,
             content,
             thought,
             parts,
-            role: candidateContent?.role ?? 'model'
+            role: candidateContent?.role ?? 'model',
+            usage,
+            finishReason
           };
         }
       }
