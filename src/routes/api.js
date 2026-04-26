@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { getConfiguredModels, saveConfiguredModels, config } from '../config/models.js';
 import { getRequestLogs, safeAppendRequestLog } from '../requestLog.js';
+import { estimateRunCost, getUsageCostSummary, safeRecordUsageCost } from '../usageCosts.js';
 import { getGcloudBillingSummary } from '../services/gcloudBilling.js';
 import { GoogleAdapter } from '../adapters/google.js';
 import { GroqAdapter } from '../adapters/groq.js';
@@ -431,6 +432,13 @@ router.get('/request-logs', requireAccessKey, async (req, res) => {
   res.json(logs);
 });
 
+router.get('/usage-costs', requireAccessKey, async (req, res) => {
+  const summary = await getUsageCostSummary({
+    month: typeof req.query.month === 'string' ? req.query.month : undefined
+  });
+  res.json(summary);
+});
+
 router.get('/billing/summary', requireAccessKey, async (req, res) => {
   try {
     const summary = await getGcloudBillingSummary(config);
@@ -562,10 +570,17 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
   const startedAt = Date.now();
   let body = null;
   let targetModel = null;
-  const writeRunLog = async (entry) => safeAppendRequestLog({
-    ...buildRunLogContext({ req, body, targetModel, startedAt }),
-    ...entry
-  });
+  const writeRunLog = async (entry) => {
+    const logEntry = {
+      ...buildRunLogContext({ req, body, targetModel, startedAt }),
+      ...entry
+    };
+    const cost = estimateRunCost(logEntry);
+    const entryWithCost = cost ? { ...logEntry, cost } : logEntry;
+
+    await safeAppendRequestLog(entryWithCost);
+    await safeRecordUsageCost(entryWithCost);
+  };
 
   try {
     body = runSchema.parse(req.body);

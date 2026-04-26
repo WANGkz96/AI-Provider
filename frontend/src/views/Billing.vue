@@ -16,7 +16,7 @@
       <div>
         <h2 class="text-lg font-semibold text-slate-100">GCloud Billing</h2>
         <p class="text-sm text-slate-500">
-          {{ summary?.projectId || 'No project detected' }}
+          {{ summary?.projectId || 'No project detected' }} / estimated API usage for {{ usage?.month || '-' }}
         </p>
       </div>
 
@@ -25,6 +25,74 @@
       </div>
 
       <template v-if="summary">
+        <section v-if="usage" class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div class="rounded-lg border border-blue-800/60 bg-blue-950/20 p-4">
+            <div class="text-xs uppercase tracking-wide text-blue-300/70">Estimated month</div>
+            <div class="mt-2 text-2xl font-semibold text-blue-100">{{ money(usage.summary?.totalUsd) }}</div>
+            <div class="mt-1 text-xs text-blue-300/60">From {{ usage.startDate || 'first logged request' }}</div>
+          </div>
+          <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Priced requests</div>
+            <div class="mt-2 text-2xl font-semibold text-slate-100">{{ usage.summary?.pricedRequestCount || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ usage.timezone }}</div>
+          </div>
+          <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Top model</div>
+            <div class="mt-2 truncate text-base font-semibold text-slate-100">{{ topUsageModel.name }}</div>
+            <div class="mt-1 text-xs text-slate-500">{{ money(topUsageModel.cost) }}</div>
+          </div>
+          <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+            <div class="text-xs uppercase tracking-wide text-slate-500">Unpriced</div>
+            <div class="mt-2 text-2xl font-semibold text-slate-100">{{ usage.summary?.unpricedRequestCount || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-500">No pricing rule or no usage</div>
+          </div>
+        </section>
+
+        <section v-if="usage" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
+            <div class="border-b border-slate-800 px-4 py-3">
+              <h3 class="text-sm font-semibold text-slate-200">Estimated Cost By Model</h3>
+              <p class="text-xs text-slate-500">Calculated from `/run` usage and public Google pricing</p>
+            </div>
+            <table class="min-w-full divide-y divide-slate-800 text-sm">
+              <thead class="bg-slate-800/70 text-xs uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">Model</th>
+                  <th class="px-4 py-3 text-right font-semibold">Cost</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800">
+                <tr v-for="row in usageModelRows" :key="row.name">
+                  <td class="px-4 py-3 text-slate-200">{{ row.name }}</td>
+                  <td class="px-4 py-3 text-right font-mono text-xs text-emerald-300">{{ money(row.cost) }}</td>
+                </tr>
+                <tr v-if="usageModelRows.length === 0">
+                  <td colspan="2" class="px-4 py-8 text-center text-slate-500">No priced Google requests this month</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
+            <div class="border-b border-slate-800 px-4 py-3">
+              <h3 class="text-sm font-semibold text-slate-200">Most Expensive Requests</h3>
+              <p class="text-xs text-slate-500">Open Logs for full request and response</p>
+            </div>
+            <div class="divide-y divide-slate-800">
+              <div v-for="request in usage.summary?.topRequests || []" :key="request.id" class="px-4 py-3">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-medium text-slate-100">{{ request.model }}</div>
+                    <div class="mt-1 text-xs text-slate-500">{{ formatTime(request.timestamp) }} / {{ request.type }}</div>
+                  </div>
+                  <div class="font-mono text-xs text-emerald-300">{{ money(request.totalUsd) }}</div>
+                </div>
+              </div>
+              <div v-if="!usage.summary?.topRequests?.length" class="px-4 py-8 text-center text-slate-500">No expensive requests yet</div>
+            </div>
+          </div>
+        </section>
+
         <section class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
             <div class="text-xs uppercase tracking-wide text-slate-500">Billing account</div>
@@ -135,11 +203,12 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import axios from 'axios';
 import Header from '../components/Header.vue';
 
 const summary = ref(null);
+const usage = ref(null);
 const loading = ref(false);
 const error = ref('');
 
@@ -148,14 +217,36 @@ const loadSummary = async () => {
   error.value = '';
 
   try {
-    const response = await axios.get('/billing/summary');
-    summary.value = response.data;
+    const [billingResult, usageResult] = await Promise.allSettled([
+      axios.get('/billing/summary'),
+      axios.get('/usage-costs')
+    ]);
+
+    if (billingResult.status === 'fulfilled') {
+      summary.value = billingResult.value.data;
+    } else {
+      summary.value = { errors: [{ label: 'billingSummary', message: billingResult.reason?.message || 'Failed to load billing summary' }] };
+    }
+
+    if (usageResult.status === 'fulfilled') {
+      usage.value = usageResult.value.data;
+    } else {
+      error.value = usageResult.reason?.response?.data?.error || usageResult.reason?.message || 'Failed to load usage costs';
+    }
   } catch (requestError) {
     error.value = requestError.response?.data?.details || requestError.response?.data?.error || requestError.message;
   } finally {
     loading.value = false;
   }
 };
+
+const usageModelRows = computed(() => (
+  Object.entries(usage.value?.summary?.byModel || {})
+    .map(([name, cost]) => ({ name, cost }))
+    .sort((a, b) => b.cost - a.cost)
+));
+
+const topUsageModel = computed(() => usageModelRows.value[0] || { name: '-', cost: null });
 
 const money = (value) => (
   Number.isFinite(value)

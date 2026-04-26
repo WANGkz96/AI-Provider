@@ -35,6 +35,7 @@
                   <th class="px-4 py-3 text-left font-semibold">Time</th>
                   <th class="px-4 py-3 text-left font-semibold">Model</th>
                   <th class="px-4 py-3 text-left font-semibold">Status</th>
+                  <th class="px-4 py-3 text-right font-semibold">Cost</th>
                   <th class="px-4 py-3 text-right font-semibold">Tokens</th>
                   <th class="px-4 py-3 text-right font-semibold">Latency</th>
                 </tr>
@@ -61,6 +62,9 @@
                     </span>
                     <span v-if="entry.stream" class="ml-2 text-xs text-slate-500">stream</span>
                   </td>
+                  <td class="px-4 py-3 text-right font-mono text-xs text-emerald-300">
+                    {{ money(entry.cost?.totalUsd) }}
+                  </td>
                   <td class="px-4 py-3 text-right font-mono text-xs text-slate-300">
                     <span>{{ tokenValue(entry.usage?.inputTokens) }}</span>
                     <span class="text-slate-600"> / </span>
@@ -69,7 +73,7 @@
                   <td class="px-4 py-3 text-right font-mono text-xs text-slate-400">{{ entry.durationMs ?? '-' }}ms</td>
                 </tr>
                 <tr v-if="!loading && logs.length === 0">
-                  <td colspan="5" class="px-4 py-10 text-center text-slate-500">No request logs yet</td>
+                  <td colspan="6" class="px-4 py-10 text-center text-slate-500">No request logs yet</td>
                 </tr>
               </tbody>
             </table>
@@ -99,6 +103,19 @@
                 <div class="text-slate-500">Finish</div>
                 <div class="mt-1 font-mono text-slate-100">{{ selectedEntry.finishReason || '-' }}</div>
               </div>
+              <div class="rounded-lg bg-slate-800/60 p-3">
+                <div class="text-slate-500">Estimated cost</div>
+                <div class="mt-1 font-mono text-emerald-200">{{ money(selectedEntry.cost?.totalUsd) }}</div>
+              </div>
+              <div class="rounded-lg bg-slate-800/60 p-3">
+                <div class="text-slate-500">Pricing rule</div>
+                <div class="mt-1 truncate font-mono text-slate-100">{{ selectedEntry.cost?.modelPricingId || '-' }}</div>
+              </div>
+            </div>
+
+            <div v-if="selectedEntry.cost">
+              <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Cost</div>
+              <pre class="max-h-[220px] overflow-auto rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-300">{{ formatJson(selectedEntry.cost) }}</pre>
             </div>
 
             <div>
@@ -168,6 +185,12 @@ const formatTime = (value) => {
 
 const tokenValue = (value) => (
   Number.isFinite(value) ? value.toLocaleString() : '-'
+);
+
+const money = (value) => (
+  Number.isFinite(value)
+    ? `$${value.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })}`
+    : '-'
 );
 
 const formatJson = (value) => {

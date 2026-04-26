@@ -1232,6 +1232,7 @@ export class GoogleAdapter extends BaseAdapter {
       mimeType: 'audio/wav',
       duration,
       usedVoice,
+      usage: this.mapNativeUsage(response?.usageMetadata),
       metadata: {
         mode: 'gemini-tts',
         model,
@@ -1408,11 +1409,15 @@ export class GoogleAdapter extends BaseAdapter {
     let trailingText = '';
     const responseParts = [];
     let responseRole = 'model';
+    let usage = null;
 
     for await (const chunk of response) {
       const candidateContent = chunk?.candidates?.[0]?.content;
       const parts = this.cloneParts(candidateContent?.parts);
       responseRole = candidateContent?.role || responseRole;
+      if (chunk?.usageMetadata) {
+        usage = this.mapNativeUsage(chunk.usageMetadata);
+      }
 
       if (parts.length > 0) {
         responseParts.push(...parts);
@@ -1457,7 +1462,8 @@ export class GoogleAdapter extends BaseAdapter {
         model,
         count: images.length,
         text: trailingText || undefined
-      }
+      },
+      usage
     };
   }
 
