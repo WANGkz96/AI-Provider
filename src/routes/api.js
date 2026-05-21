@@ -2,11 +2,16 @@ import express from 'express';
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { getConfiguredModels, saveConfiguredModels, config } from '../config/models.js';
+import { getRequestLogs, safeAppendRequestLog } from '../requestLog.js';
+import { estimateRunCost, getUsageCostSummary, safeRecordUsageCost } from '../usageCosts.js';
+import { getGcloudBillingSummary } from '../services/gcloudBilling.js';
 import { GoogleAdapter } from '../adapters/google.js';
 import { GroqAdapter } from '../adapters/groq.js';
 import { LocalAdapter } from '../adapters/local.js';
 import { ChatterboxAdapter } from '../adapters/chatterbox.js';
+import { VertexOpenAIAdapter } from '../adapters/vertexOpenAI.js';
 import {
   createAccessControlMiddleware,
   createConcurrencyLimiter,
@@ -91,6 +96,7 @@ const toolChoiceSchema = z.union([
 // Initialize Providers
 const providers = {
   google: new GoogleAdapter(config),
+  vertexOpenAI: new VertexOpenAIAdapter(config),
   groq: new GroqAdapter(config),
   local: new LocalAdapter(config),
   chatterbox: new ChatterboxAdapter(config)
@@ -304,6 +310,84 @@ function isPathInsideRoot(rootPath, candidatePath) {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
+function buildRunLogContext({ req, body, targetModel, startedAt }) {
+  return {
+    route: '/run',
+    method: req.method,
+    subject: req.authSubject || null,
+    ip: req.ip || req.socket?.remoteAddress || null,
+    durationMs: Date.now() - startedAt,
+    model: body?.model ?? req.body?.model ?? null,
+    provider: targetModel?.provider ?? null,
+    apiModelId: targetModel?.apiModelId ?? null,
+    type: targetModel?.type || 'text',
+    request: {
+      body: body || req.body || null
+    }
+  };
+}
+
+function buildResponseLogPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  if (payload.type === 'text') {
+    return {
+      type: payload.type,
+      content: payload.content,
+      output_text: payload.output_text,
+      parsed_output: payload.parsed_output,
+      message: payload.message,
+      finishReason: payload.finishReason,
+      usage: payload.usage,
+      blockedReason: payload.blockedReason,
+      truncated: payload.truncated,
+      metadata: payload.metadata
+    };
+  }
+
+  if (payload.type === 'audio') {
+    return {
+      type: payload.type,
+      audioUrl: payload.audioUrl,
+      audio: payload.audio ? {
+        mimeType: payload.audio.mimeType,
+        dataLength: payload.audio.data?.length || 0
+      } : null,
+      metadata: payload.metadata
+    };
+  }
+
+  if (payload.type === 'image') {
+    return {
+      type: payload.type,
+      images: (payload.images || []).map((image) => ({
+        mimeType: image.mimeType,
+        fileName: image.fileName,
+        dataLength: image.data?.length || image.dataUrl?.length || 0
+      })),
+      message: payload.message,
+      provider_state: payload.provider_state,
+      metadata: payload.metadata
+    };
+  }
+
+  if (payload.type === 'video') {
+    return {
+      type: payload.type,
+      videos: (payload.videos || []).map((video) => ({
+        mimeType: video.mimeType,
+        fileName: video.fileName,
+        dataLength: video.data?.length || video.dataUrl?.length || 0
+      })),
+      metadata: payload.metadata
+    };
+  }
+
+  return payload;
+}
+
 // --- Routes ---
 
 router.get('/health', (req, res) => {
@@ -343,6 +427,31 @@ router.post('/config', requireAccessKey, (req, res) => {
     }
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/request-logs', requireAccessKey, async (req, res) => {
+  const logs = await getRequestLogs({ limit: req.query.limit });
+  res.json(logs);
+});
+
+router.get('/usage-costs', requireAccessKey, async (req, res) => {
+  const summary = await getUsageCostSummary({
+    month: typeof req.query.month === 'string' ? req.query.month : undefined
+  });
+  res.json(summary);
+});
+
+router.get('/billing/summary', requireAccessKey, async (req, res) => {
+  try {
+    const summary = await getGcloudBillingSummary(config);
+    res.json(summary);
+  } catch (error) {
+    console.error('GCloud billing summary error:', error);
+    res.status(500).json({
+      error: 'Failed to load GCloud billing summary',
+      details: error.message
+    });
   }
 });
 
@@ -461,8 +570,25 @@ router.get('/audio-proxy', requireAccessKey, (req, res) => {
 });
 
 router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, async (req, res) => {
+  const startedAt = Date.now();
+  let body = null;
+  let targetModel = null;
+  const writeRunLog = async (entry) => {
+    const logEntry = {
+      id: entry.id || randomUUID(),
+      timestamp: entry.timestamp || new Date().toISOString(),
+      ...buildRunLogContext({ req, body, targetModel, startedAt }),
+      ...entry
+    };
+    const cost = estimateRunCost(logEntry);
+    const entryWithCost = cost ? { ...logEntry, cost } : logEntry;
+
+    await safeAppendRequestLog(entryWithCost);
+    await safeRecordUsageCost(entryWithCost);
+  };
+
   try {
-    const body = runSchema.parse(req.body);
+    body = runSchema.parse(req.body);
     const requestedMaxTokens = body.maxTokens ?? body.max_tokens;
     const defaultMaxTokens = config.defaultGenerationTokens > 0
       ? config.defaultGenerationTokens
@@ -486,18 +612,33 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     const resolvedStrictJson = body.strictJson ?? (body.output?.type === 'json_schema' ? true : undefined);
 
     const models = getConfiguredModels();
-    const targetModel = models.find(m => m.id === body.model);
+    targetModel = models.find(m => m.id === body.model);
 
     if (!targetModel) {
+      await writeRunLog({
+        ok: false,
+        statusCode: 404,
+        error: `Model '${body.model}' not found in configuration.`
+      });
       return res.status(404).json({ error: `Model '${body.model}' not found in configuration.` });
     }
 
     const provider = providers[targetModel.provider];
     if (!provider) {
+      await writeRunLog({
+        ok: false,
+        statusCode: 500,
+        error: `Provider '${targetModel.provider}' not initialized.`
+      });
       return res.status(500).json({ error: `Provider '${targetModel.provider}' not initialized.` });
     }
 
     if (body.stream && usesAdvancedTextContract(body)) {
+      await writeRunLog({
+        ok: false,
+        statusCode: 400,
+        error: 'Streaming is currently not supported when using output schemas or tool calling'
+      });
       return res.status(400).json({
         error: 'Streaming is currently not supported when using output schemas or tool calling'
       });
@@ -553,6 +694,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       try {
         const stream = await provider.generate({ ...generateParams, stream: true });
         const streamedParts = [];
+        const streamedContent = [];
+        const streamedThoughts = [];
+        let streamedUsage = null;
+        let streamedFinishReason = null;
         let streamedRole = 'model';
 
         for await (const chunk of stream) {
@@ -566,11 +711,23 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
               ? chunk.thought
               : '';
             const chunkParts = Array.isArray(chunk?.parts) ? chunk.parts : [];
+            if (chunk?.usage) {
+              streamedUsage = chunk.usage;
+            }
+            if (chunk?.finishReason) {
+              streamedFinishReason = chunk.finishReason;
+            }
 
             if (typeof chunk?.role === 'string' && chunk.role.length > 0) {
               streamedRole = chunk.role;
             }
 
+            if (chunkText) {
+              streamedContent.push(chunkText);
+            }
+            if (chunkThought) {
+              streamedThoughts.push(chunkThought);
+            }
             if (chunkParts.length > 0) {
               streamedParts.push(...chunkParts);
             }
@@ -599,10 +756,34 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
 
         res.write('data: [DONE]\n\n');
         res.end();
+        await writeRunLog({
+          ok: true,
+          statusCode: 200,
+          stream: true,
+          usage: streamedUsage,
+          finishReason: streamedFinishReason,
+          response: {
+            type: 'text',
+            content: streamedContent.join(''),
+            thought: streamedThoughts.join(''),
+            provider_state: streamedParts.length > 0 ? {
+              role: streamedRole,
+              parts: streamedParts
+            } : null,
+            usage: streamedUsage,
+            finishReason: streamedFinishReason
+          }
+        });
       } catch (streamError) {
         console.error('Streaming error:', streamError);
         res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
         res.end();
+        await writeRunLog({
+          ok: false,
+          statusCode: 500,
+          stream: true,
+          error: streamError.message
+        });
       }
     } else {
       // Standard Response (Text or Audio)
@@ -610,7 +791,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       
       if (targetModel.type === 'audio') {
           if (response.type === 'audio' && (response.audioUrl || response.data)) {
-              res.json({
+              const payload = {
                   type: 'audio',
                   audioUrl: response.audioUrl || null,
                   audio: response.data ? {
@@ -623,30 +804,69 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
                       duration: response.duration ?? response.metadata?.duration ?? null,
                       voice: response.usedVoice ?? response.metadata?.voice ?? null
                   }
+              };
+              await writeRunLog({
+                ok: true,
+                statusCode: 200,
+                response: buildResponseLogPayload(payload),
+                usage: response.usage ?? null
               });
+              res.json(payload);
           } else {
+              await writeRunLog({
+                ok: false,
+                statusCode: 500,
+                error: 'Invalid audio response from adapter',
+                response: buildResponseLogPayload(response)
+              });
               res.status(500).json({ error: 'Invalid audio response from adapter' });
           }
       } else if (targetModel.type === 'image') {
           if (response.type === 'image' && Array.isArray(response.images) && response.images.length > 0) {
-              res.json({
+              const payload = {
                   type: 'image',
                   images: response.images,
                   message: response.message || null,
                   provider_state: response.providerState || response.message?.providerState || response.message?.provider_state || null,
                   metadata: response.metadata || {}
+              };
+              await writeRunLog({
+                ok: true,
+                statusCode: 200,
+                response: buildResponseLogPayload(payload),
+                usage: response.usage ?? null
               });
+              res.json(payload);
           } else {
+              await writeRunLog({
+                ok: false,
+                statusCode: 500,
+                error: 'Invalid image response from adapter',
+                response: buildResponseLogPayload(response)
+              });
               res.status(500).json({ error: 'Invalid image response from adapter' });
           }
       } else if (targetModel.type === 'video') {
           if (response.type === 'video' && Array.isArray(response.videos) && response.videos.length > 0) {
-              res.json({
+              const payload = {
                   type: 'video',
                   videos: response.videos,
                   metadata: response.metadata || {}
+              };
+              await writeRunLog({
+                ok: true,
+                statusCode: 200,
+                response: buildResponseLogPayload(payload),
+                usage: response.usage ?? null
               });
+              res.json(payload);
           } else {
+              await writeRunLog({
+                ok: false,
+                statusCode: 500,
+                error: 'Invalid video response from adapter',
+                response: buildResponseLogPayload(response)
+              });
               res.status(500).json({ error: 'Invalid video response from adapter' });
           }
       } else {
@@ -668,7 +888,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             const parsedResult = tryParseJson(content);
 
             if (!parsedResult.ok && strictJson) {
-              return res.status(422).json({
+              const payload = {
                 error: 'Model returned invalid JSON',
                 details: parsedResult.error,
                 content,
@@ -685,7 +905,16 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
                   responseSchemaProvided: !!(resolvedResponseSchema || resolvedResponseJsonSchema),
                   strictJson
                 }
+              };
+              await writeRunLog({
+                ok: false,
+                statusCode: 422,
+                error: payload.error,
+                response: payload,
+                usage: normalized.usage,
+                finishReason
               });
+              return res.status(422).json(payload);
             }
 
             if (parsedResult.ok) {
@@ -695,7 +924,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             }
           }
 
-          res.json({
+          const payload = {
             type: 'text',
             content,
             message: {
@@ -722,18 +951,43 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
               strictJson,
               provider: normalized.providerMetadata
             }
+          };
+          await writeRunLog({
+            ok: true,
+            statusCode: 200,
+            response: buildResponseLogPayload(payload),
+            usage: normalized.usage,
+            finishReason
           });
+          res.json(payload);
       }
     }
 
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Validation Error', details: error.errors });
+      const validationDetails = error.issues || error.errors;
+      await writeRunLog({
+        ok: false,
+        statusCode: 400,
+        error: 'Validation Error',
+        details: validationDetails
+      });
+      return res.status(400).json({ error: 'Validation Error', details: validationDetails });
     }
     if (error?.message === 'Media attachments are currently supported only for Gemini text models') {
+      await writeRunLog({
+        ok: false,
+        statusCode: 400,
+        error: error.message
+      });
       return res.status(400).json({ error: error.message });
     }
     console.error('Generation Error:', error);
+    await writeRunLog({
+      ok: false,
+      statusCode: 500,
+      error: error.message || 'Internal Server Error'
+    });
     res.status(500).json({ error: error.message || 'Internal Server Error' });
   }
 });

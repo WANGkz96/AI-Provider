@@ -55,6 +55,21 @@ const parseOptionalPositiveIntEnv = (name, fallback) => {
   return parsedValue > 0 ? parsedValue : 0;
 };
 
+const parseOptionalPositiveFloatEnv = (name, fallback) => {
+  const rawValue = process.env[name];
+  if (rawValue === undefined || rawValue === '') {
+    return fallback;
+  }
+
+  const parsedValue = Number.parseFloat(rawValue);
+  if (!Number.isFinite(parsedValue)) {
+    console.warn(`Invalid ${name}='${rawValue}', using ${fallback}`);
+    return fallback;
+  }
+
+  return parsedValue > 0 ? parsedValue : 0;
+};
+
 const parseBooleanEnv = (name, fallback = false) => {
   const rawValue = process.env[name];
   if (rawValue === undefined || rawValue === '') {
@@ -107,6 +122,15 @@ const resolveProjectPath = (value) => {
     ? path.resolve(value)
     : path.resolve(PROJECT_ROOT, value);
 };
+
+const hasConfiguredAuth = Boolean(
+  process.env.AI_PROVIDER_API_KEY
+  || (process.env.BASIC_AUTH_USERNAME && process.env.BASIC_AUTH_PASSWORD)
+);
+const disableConfigRoutes = parseBooleanEnv('DISABLE_CONFIG_ROUTES', false);
+const enableConfigRoutes = !disableConfigRoutes && (
+  hasConfiguredAuth || parseBooleanEnv('ENABLE_CONFIG_ROUTES', false)
+);
 
 /**
  * Reads configured models from models.json
@@ -163,9 +187,25 @@ export const config = {
   basicAuthUsername: process.env.BASIC_AUTH_USERNAME || '',
   basicAuthPassword: process.env.BASIC_AUTH_PASSWORD || '',
   apiKey: process.env.AI_PROVIDER_API_KEY || '',
-  enableConfigRoutes: parseBooleanEnv('ENABLE_CONFIG_ROUTES', false),
+  enableConfigRoutes,
   enableAudioProxy: parseBooleanEnv('ENABLE_AUDIO_PROXY', false),
   audioProxyRoot: resolveProjectPath(process.env.AUDIO_PROXY_ROOT),
+  requestLogPath: resolveProjectPath(process.env.REQUEST_LOG_PATH) || path.join(PROJECT_ROOT, 'data/request-log.json'),
+  requestLogLimit: parseOptionalPositiveIntEnv('REQUEST_LOG_LIMIT', 150),
+  requestLogViewLimit: parseOptionalPositiveIntEnv('REQUEST_LOG_VIEW_LIMIT', 100),
+  requestLogTextLimit: parseOptionalPositiveIntEnv('REQUEST_LOG_TEXT_LIMIT', 12000),
+  usageCostLedgerPath: resolveProjectPath(process.env.USAGE_COST_LEDGER_PATH) || path.join(PROJECT_ROOT, 'data/usage-costs.json'),
+  usageCostJournalPath: resolveProjectPath(process.env.USAGE_COST_JOURNAL_PATH) || path.join(PROJECT_ROOT, 'data/usage-cost-events.jsonl'),
+  usageCostLedgerMonths: parseOptionalPositiveIntEnv('USAGE_COST_LEDGER_MONTHS', 24),
+  usageCostTopRequests: parseOptionalPositiveIntEnv('USAGE_COST_TOP_REQUESTS', 50),
+  usageCostReportStartDate: process.env.USAGE_COST_REPORT_START_DATE || '',
+  usageCostTimezone: process.env.USAGE_COST_TIMEZONE || process.env.TZ || 'UTC',
+  enableGcloudBillingSummary: parseBooleanEnv('ENABLE_GCLOUD_BILLING_SUMMARY', true),
+  gcloudBillingProject: process.env.GCLOUD_BILLING_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || '',
+  gcloudBillingAccountId: process.env.GCLOUD_BILLING_ACCOUNT_ID || '',
+  gcloudBillingExportTable: process.env.GCLOUD_BILLING_EXPORT_TABLE || '',
+  gcloudTrialCreditTotalUsd: parseOptionalPositiveFloatEnv('GCLOUD_TRIAL_CREDIT_TOTAL_USD', 300),
+  gcloudBillingLookbackDays: parsePositiveIntEnv('GCLOUD_BILLING_LOOKBACK_DAYS', 120),
   runRateLimitWindowMs: parsePositiveIntEnv('RUN_RATE_LIMIT_WINDOW_MS', 60 * 1000),
   runRateLimitMax: parseOptionalPositiveIntEnv('RUN_RATE_LIMIT_MAX', 30),
   runConcurrencyLimit: parseOptionalPositiveIntEnv('RUN_CONCURRENCY_LIMIT', 2),

@@ -601,14 +601,25 @@ export class GoogleAdapter extends BaseAdapter {
         const parts = cloneParts(candidateContent?.parts);
         const content = extractChunkText(chunk);
         const thought = extractThoughtText(chunk);
+        const usage = chunk?.usageMetadata
+          ? {
+              inputTokens: chunk.usageMetadata.promptTokenCount ?? null,
+              outputTokens: chunk.usageMetadata.candidatesTokenCount ?? null,
+              totalTokens: chunk.usageMetadata.totalTokenCount ?? null,
+              raw: chunk.usageMetadata
+            }
+          : null;
+        const finishReason = chunk?.candidates?.[0]?.finishReason ?? null;
 
-        if (content || thought || parts.length > 0) {
+        if (content || thought || parts.length > 0 || usage || finishReason) {
           yield {
             text: () => content,
             content,
             thought,
             parts,
-            role: candidateContent?.role ?? 'model'
+            role: candidateContent?.role ?? 'model',
+            usage,
+            finishReason
           };
         }
       }
@@ -1132,9 +1143,13 @@ export class GoogleAdapter extends BaseAdapter {
   mapNativeUsage(usageMetadata) {
     if (!usageMetadata) return null;
 
+    const candidateTokens = usageMetadata.candidatesTokenCount;
+    const thoughtsTokens = usageMetadata.thoughtsTokenCount;
+    const hasOutputTokens = candidateTokens !== undefined || thoughtsTokens !== undefined;
+
     return {
       inputTokens: usageMetadata.promptTokenCount ?? null,
-      outputTokens: usageMetadata.candidatesTokenCount ?? null,
+      outputTokens: hasOutputTokens ? ((candidateTokens ?? 0) + (thoughtsTokens ?? 0)) : null,
       totalTokens: usageMetadata.totalTokenCount ?? null,
       raw: usageMetadata
     };
@@ -1221,6 +1236,7 @@ export class GoogleAdapter extends BaseAdapter {
       mimeType: 'audio/wav',
       duration,
       usedVoice,
+      usage: this.mapNativeUsage(response?.usageMetadata),
       metadata: {
         mode: 'gemini-tts',
         model,
@@ -1397,11 +1413,15 @@ export class GoogleAdapter extends BaseAdapter {
     let trailingText = '';
     const responseParts = [];
     let responseRole = 'model';
+    let usage = null;
 
     for await (const chunk of response) {
       const candidateContent = chunk?.candidates?.[0]?.content;
       const parts = this.cloneParts(candidateContent?.parts);
       responseRole = candidateContent?.role || responseRole;
+      if (chunk?.usageMetadata) {
+        usage = this.mapNativeUsage(chunk.usageMetadata);
+      }
 
       if (parts.length > 0) {
         responseParts.push(...parts);
@@ -1446,7 +1466,8 @@ export class GoogleAdapter extends BaseAdapter {
         model,
         count: images.length,
         text: trailingText || undefined
-      }
+      },
+      usage
     };
   }
 

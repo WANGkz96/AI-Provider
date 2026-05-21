@@ -35,6 +35,13 @@
     "type": "text"
   },
   {
+    "id": "gemini-3.5-flash",
+    "provider": "google",
+    "apiModelId": "gemini-3.5-flash",
+    "adapterMode": "openai",
+    "type": "text"
+  },
+  {
     "id": "gemini-3-pro-preview",
     "provider": "google",
     "apiModelId": "gemini-3-pro-preview",
@@ -98,6 +105,30 @@
     "videoMode": "veo"
   },
   {
+    "id": "grok-4.1-fast-non-reasoning",
+    "provider": "vertexOpenAI",
+    "apiModelId": "xai/grok-4.1-fast-non-reasoning",
+    "type": "text"
+  },
+  {
+    "id": "grok-4.1-fast-reasoning",
+    "provider": "vertexOpenAI",
+    "apiModelId": "xai/grok-4.1-fast-reasoning",
+    "type": "text"
+  },
+  {
+    "id": "grok-4.20-non-reasoning",
+    "provider": "vertexOpenAI",
+    "apiModelId": "xai/grok-4.20-non-reasoning",
+    "type": "text"
+  },
+  {
+    "id": "grok-4.20-reasoning",
+    "provider": "vertexOpenAI",
+    "apiModelId": "xai/grok-4.20-reasoning",
+    "type": "text"
+  },
+  {
     "id": "llama-3.3-70b-versatile",
     "provider": "groq",
     "apiModelId": "llama-3.3-70b-versatile",
@@ -141,6 +172,13 @@
   },
   {
     "id": "gemini-2.5-flash-preview-tts",
+    "provider": "google",
+    "apiModelId": "gemini-2.5-flash-preview-tts",
+    "type": "audio",
+    "audioMode": "gemini-tts"
+  },
+  {
+    "id": "gemini-2.5-flash-tts",
     "provider": "google",
     "apiModelId": "gemini-2.5-flash-preview-tts",
     "type": "audio",
