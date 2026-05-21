@@ -1143,9 +1143,13 @@ export class GoogleAdapter extends BaseAdapter {
   mapNativeUsage(usageMetadata) {
     if (!usageMetadata) return null;
 
+    const candidateTokens = usageMetadata.candidatesTokenCount;
+    const thoughtsTokens = usageMetadata.thoughtsTokenCount;
+    const hasOutputTokens = candidateTokens !== undefined || thoughtsTokens !== undefined;
+
     return {
       inputTokens: usageMetadata.promptTokenCount ?? null,
-      outputTokens: usageMetadata.candidatesTokenCount ?? null,
+      outputTokens: hasOutputTokens ? ((candidateTokens ?? 0) + (thoughtsTokens ?? 0)) : null,
       totalTokens: usageMetadata.totalTokenCount ?? null,
       raw: usageMetadata
     };

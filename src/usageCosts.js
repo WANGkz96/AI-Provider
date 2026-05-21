@@ -5,6 +5,8 @@ import { config } from './config/models.js';
 const TOKENS_PER_MILLION = 1_000_000;
 const DEFAULT_TOP_REQUESTS = 50;
 const DEFAULT_LEDGER_MONTHS = 24;
+const LEDGER_LOCK_STALE_MS = 30_000;
+const LEDGER_LOCK_WAIT_MS = 75;
 
 let ledgerWriteQueue = Promise.resolve();
 
@@ -36,6 +38,14 @@ const GOOGLE_PRICING = {
     inputPer1M: 0.25,
     inputAudioPer1M: 0.5,
     outputPer1M: 1.5
+  },
+  'gemini-3.5-flash': {
+    source: 'Google Agent Platform pricing, Standard tier',
+    inputPer1M: 1.5,
+    inputLongPer1M: 1.5,
+    outputPer1M: 9,
+    outputLongPer1M: 9,
+    longContextThreshold: 200_000
   },
   'gemini-2.5-flash': {
     source: 'Google Vertex AI / Gemini API pricing, Standard tier',
@@ -136,12 +146,33 @@ const GOOGLE_PRICING = {
   'veo-3.1-lite-generate-preview': {
     source: 'Google Gemini API pricing, Standard tier',
     outputVideoSecondUsd: { default: 0.08, '720p': 0.05, '1080p': 0.08 }
+  },
+  'grok-4.1-fast-non-reasoning': {
+    source: 'Google Agent Platform pricing, xAI Grok models',
+    inputPer1M: 0.2,
+    outputPer1M: 0.5
+  },
+  'grok-4.1-fast-reasoning': {
+    source: 'Google Agent Platform pricing, xAI Grok models',
+    inputPer1M: 0.2,
+    outputPer1M: 0.5
+  },
+  'grok-4.20-non-reasoning': {
+    source: 'Google Agent Platform pricing, xAI Grok models',
+    inputPer1M: 1.25,
+    outputPer1M: 2.5
+  },
+  'grok-4.20-reasoning': {
+    source: 'Google Agent Platform pricing, xAI Grok models',
+    inputPer1M: 1.25,
+    outputPer1M: 2.5
   }
 };
 
 const normalizeModelId = (value) => String(value || '')
   .trim()
   .replace(/^models\//, '')
+  .replace(/^xai\//, '')
   .toLowerCase();
 
 const money = (value) => (
@@ -236,7 +267,7 @@ const estimateTokenCost = ({ pricing, usage, requestType }) => {
 
 export const estimateRunCost = (entry) => {
   const provider = String(entry?.provider || '').toLowerCase();
-  if (provider !== 'google') {
+  if (!['google', 'vertexopenai'].includes(provider)) {
     return null;
   }
 
@@ -310,6 +341,43 @@ export const estimateRunCost = (entry) => {
 };
 
 const getLedgerPath = () => config.usageCostLedgerPath;
+const getJournalPath = () => config.usageCostJournalPath;
+
+const sleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+const acquireLedgerLock = async () => {
+  const lockPath = `${getLedgerPath()}.lock`;
+
+  for (;;) {
+    try {
+      await fs.mkdir(lockPath);
+      await fs.writeFile(path.join(lockPath, 'owner'), `${process.pid}\n${new Date().toISOString()}\n`, 'utf8');
+      return async () => {
+        await fs.rm(lockPath, { recursive: true, force: true });
+      };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') {
+        throw error;
+      }
+
+      try {
+        const stat = await fs.stat(lockPath);
+        if ((Date.now() - stat.mtimeMs) > LEDGER_LOCK_STALE_MS) {
+          await fs.rm(lockPath, { recursive: true, force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError?.code !== 'ENOENT') {
+          throw statError;
+        }
+      }
+
+      await sleep(LEDGER_LOCK_WAIT_MS);
+    }
+  }
+};
 
 const readLedger = async () => {
   try {
@@ -334,6 +402,12 @@ const writeLedger = async (ledger) => {
   await fs.rename(tempPath, ledgerPath);
 };
 
+const appendJournalEntry = async (event) => {
+  const journalPath = getJournalPath();
+  await fs.mkdir(path.dirname(journalPath), { recursive: true });
+  await fs.appendFile(journalPath, `${JSON.stringify(event)}\n`, 'utf8');
+};
+
 const formatDateParts = (date, timeZone) => {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -348,6 +422,113 @@ const formatDateParts = (date, timeZone) => {
   };
 };
 
+const parseDateKey = (value) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+  if (!match) {
+    return null;
+  }
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3])
+  };
+};
+
+const daysInMonth = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+const toDateKey = ({ year, month, day }) => (
+  `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+);
+
+const addMonths = ({ year, month }, offset) => {
+  const date = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1
+  };
+};
+
+const previousDateKey = (dateKey) => {
+  const parsed = parseDateKey(dateKey);
+  if (!parsed) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day) - 24 * 60 * 60 * 1000);
+  return toDateKey({
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate()
+  });
+};
+
+const cycleStartForMonth = ({ year, month }, startDay) => (
+  toDateKey({
+    year,
+    month,
+    day: Math.min(startDay, daysInMonth(year, month))
+  })
+);
+
+const calendarPeriodForMonth = (monthKey) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || ''));
+  if (!match) {
+    return {
+      key: monthKey,
+      type: 'calendar-month',
+      startDate: null,
+      endDate: null,
+      label: monthKey
+    };
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const startDate = toDateKey({ year, month, day: 1 });
+  const endDate = toDateKey({ year, month, day: daysInMonth(year, month) });
+
+  return {
+    key: monthKey,
+    type: 'calendar-month',
+    startDate,
+    endDate,
+    label: `${startDate} - ${endDate}`
+  };
+};
+
+const resolveReportCycle = (dateKey) => {
+  const dateParts = parseDateKey(dateKey);
+  const reportStart = parseDateKey(config.usageCostReportStartDate);
+  if (!dateParts || !reportStart) {
+    const monthKey = String(dateKey || '').slice(0, 7);
+    return {
+      key: monthKey,
+      startDate: `${monthKey}-01`,
+      endDate: null,
+      label: monthKey,
+      type: 'calendar-month'
+    };
+  }
+
+  const startDay = reportStart.day;
+  const startMonth = dateParts.day >= startDay
+    ? { year: dateParts.year, month: dateParts.month }
+    : addMonths({ year: dateParts.year, month: dateParts.month }, -1);
+  const nextStartMonth = addMonths(startMonth, 1);
+  const startDate = cycleStartForMonth(startMonth, startDay);
+  const nextStartDate = cycleStartForMonth(nextStartMonth, startDay);
+  const endDate = previousDateKey(nextStartDate);
+
+  return {
+    key: startDate,
+    startDate,
+    endDate,
+    label: `${startDate} - ${endDate}`,
+    type: 'report-cycle'
+  };
+};
+
 const shouldIncludeEntry = (entry, timeZone) => {
   const startDate = config.usageCostReportStartDate;
   if (!startDate) {
@@ -357,8 +538,13 @@ const shouldIncludeEntry = (entry, timeZone) => {
   return formatDateParts(new Date(entry.timestamp), timeZone).dateKey >= startDate;
 };
 
-const emptyMonth = (monthKey) => ({
-  month: monthKey,
+const emptySummary = (periodKey, period = {}) => ({
+  month: periodKey,
+  periodKey,
+  periodType: period.type || 'calendar-month',
+  periodStart: period.startDate || null,
+  periodEnd: period.endDate || null,
+  periodLabel: period.label || periodKey,
   requestCount: 0,
   pricedRequestCount: 0,
   unpricedRequestCount: 0,
@@ -369,6 +555,10 @@ const emptyMonth = (monthKey) => ({
   byDay: {},
   topRequests: []
 });
+
+const emptyMonth = (monthKey) => emptySummary(monthKey, calendarPeriodForMonth(monthKey));
+
+const emptyCycle = (cycle) => emptySummary(cycle.key, cycle);
 
 const addToBucket = (bucket, key, costUsd) => {
   const safeKey = key || 'unknown';
@@ -397,6 +587,115 @@ const trimTopRequests = (month) => {
     .slice(0, limit);
 };
 
+const applyUsageEntryToSummary = (summary, entry, dateKey) => {
+  const costUsd = entry.cost.totalUsd || 0;
+  summary.requestCount += 1;
+  if (entry.cost.priced) {
+    summary.pricedRequestCount += 1;
+  } else {
+    summary.unpricedRequestCount += 1;
+  }
+  summary.totalUsd = money(summary.totalUsd + costUsd);
+  addToBucket(summary.byProvider, entry.provider, costUsd);
+  addToBucket(summary.byModel, entry.model, costUsd);
+  addToBucket(summary.byType, entry.type, costUsd);
+  addToBucket(summary.byDay, dateKey, costUsd);
+  summary.topRequests ||= [];
+  summary.topRequests.push({
+    id: entry.id,
+    timestamp: entry.timestamp,
+    model: entry.model,
+    provider: entry.provider,
+    type: entry.type,
+    totalUsd: costUsd,
+    inputUsd: entry.cost.inputUsd,
+    outputUsd: entry.cost.outputUsd,
+    imageUsd: entry.cost.imageUsd,
+    videoUsd: entry.cost.videoUsd,
+    durationMs: entry.durationMs
+  });
+  trimTopRequests(summary);
+};
+
+const mergeBucket = (target, source) => {
+  for (const [key, value] of Object.entries(source || {})) {
+    addToBucket(target, key, Number(value) || 0);
+  }
+};
+
+const mergeFullSummary = (target, source) => {
+  target.requestCount += source.requestCount || 0;
+  target.pricedRequestCount += source.pricedRequestCount || 0;
+  target.unpricedRequestCount += source.unpricedRequestCount || 0;
+  target.totalUsd = money(target.totalUsd + (source.totalUsd || 0));
+  mergeBucket(target.byProvider, source.byProvider);
+  mergeBucket(target.byModel, source.byModel);
+  mergeBucket(target.byType, source.byType);
+  mergeBucket(target.byDay, source.byDay);
+  target.topRequests = [...(target.topRequests || []), ...(source.topRequests || [])];
+  trimTopRequests(target);
+};
+
+const isDateInRange = (dateKey, startDate, endDate) => (
+  (!startDate || dateKey >= startDate)
+  && (!endDate || dateKey <= endDate)
+);
+
+const buildCycleFromMonths = (ledger, cycle) => {
+  const summary = emptyCycle(cycle);
+
+  for (const month of Object.values(ledger.months || {})) {
+    const dayKeys = Object.keys(month.byDay || {});
+    if (!dayKeys.length) {
+      continue;
+    }
+
+    const hasAnyDayInRange = dayKeys.some((dateKey) => isDateInRange(dateKey, cycle.startDate, cycle.endDate));
+    if (!hasAnyDayInRange) {
+      continue;
+    }
+
+    const allKnownDaysInRange = dayKeys.every((dateKey) => isDateInRange(dateKey, cycle.startDate, cycle.endDate));
+    if (allKnownDaysInRange) {
+      mergeFullSummary(summary, month);
+      continue;
+    }
+
+    for (const dateKey of dayKeys) {
+      if (isDateInRange(dateKey, cycle.startDate, cycle.endDate)) {
+        const costUsd = Number(month.byDay?.[dateKey]) || 0;
+        summary.totalUsd = money(summary.totalUsd + costUsd);
+        addToBucket(summary.byDay, dateKey, costUsd);
+      }
+    }
+  }
+
+  return summary;
+};
+
+const buildCostJournalEvent = ({ entry, monthKey, dateKey, cycle }) => ({
+  schemaVersion: 1,
+  kind: 'run-cost',
+  id: entry.id,
+  timestamp: entry.timestamp,
+  recordedAt: new Date().toISOString(),
+  dateKey,
+  monthKey,
+  cycleKey: cycle.key,
+  cycleStart: cycle.startDate,
+  cycleEnd: cycle.endDate,
+  ok: Boolean(entry.ok),
+  statusCode: entry.statusCode ?? null,
+  provider: entry.provider || 'unknown',
+  model: entry.model || 'unknown',
+  apiModelId: entry.apiModelId || null,
+  type: entry.type || 'unknown',
+  durationMs: entry.durationMs ?? null,
+  usage: entry.usage || entry.response?.usage || null,
+  cost: entry.cost,
+  costSchemaVersion: 'google-public-pricing-2026-04-26'
+});
+
 export const recordUsageCost = async (entry) => {
   if (!entry?.ok || !entry?.cost) {
     return;
@@ -410,43 +709,40 @@ export const recordUsageCost = async (entry) => {
   ledgerWriteQueue = ledgerWriteQueue
     .catch(() => {})
     .then(async () => {
-      const ledger = await readLedger();
-      const { monthKey, dateKey } = formatDateParts(new Date(entry.timestamp), timeZone);
-      ledger.startDate = config.usageCostReportStartDate || null;
-      ledger.timezone = timeZone;
-      ledger.updatedAt = new Date().toISOString();
-      ledger.months ||= {};
+      const releaseLock = await acquireLedgerLock();
+      try {
+        const ledger = await readLedger();
+        const { monthKey, dateKey } = formatDateParts(new Date(entry.timestamp), timeZone);
+        const cycle = resolveReportCycle(dateKey);
+        const journalEvent = buildCostJournalEvent({ entry, monthKey, dateKey, cycle });
+        await appendJournalEntry(journalEvent);
 
-      const month = ledger.months[monthKey] || emptyMonth(monthKey);
-      const costUsd = entry.cost.totalUsd || 0;
-      month.requestCount += 1;
-      if (entry.cost.priced) {
-        month.pricedRequestCount += 1;
-      } else {
-        month.unpricedRequestCount += 1;
+        ledger.startDate = config.usageCostReportStartDate || null;
+        ledger.timezone = timeZone;
+        ledger.updatedAt = new Date().toISOString();
+        ledger.months ||= {};
+        ledger.cycles ||= {};
+        ledger.journal ||= {};
+        ledger.journal.path = getJournalPath();
+        ledger.journal.schemaVersion = 1;
+        ledger.journal.recordCount = (ledger.journal.recordCount || 0) + 1;
+        ledger.journal.lastEventId = entry.id;
+        ledger.journal.updatedAt = ledger.updatedAt;
+
+        const month = ledger.months[monthKey] || emptyMonth(monthKey);
+        applyUsageEntryToSummary(month, entry, dateKey);
+        ledger.months[monthKey] = month;
+
+        const cycleSummary = ledger.cycles[cycle.key] || emptyCycle(cycle);
+        applyUsageEntryToSummary(cycleSummary, entry, dateKey);
+        ledger.cycles[cycle.key] = cycleSummary;
+
+        trimLedgerMonths(ledger.months);
+        trimLedgerMonths(ledger.cycles);
+        await writeLedger(ledger);
+      } finally {
+        await releaseLock();
       }
-      month.totalUsd = money(month.totalUsd + costUsd);
-      addToBucket(month.byProvider, entry.provider, costUsd);
-      addToBucket(month.byModel, entry.model, costUsd);
-      addToBucket(month.byType, entry.type, costUsd);
-      addToBucket(month.byDay, dateKey, costUsd);
-      month.topRequests.push({
-        id: entry.id,
-        timestamp: entry.timestamp,
-        model: entry.model,
-        provider: entry.provider,
-        type: entry.type,
-        totalUsd: costUsd,
-        inputUsd: entry.cost.inputUsd,
-        outputUsd: entry.cost.outputUsd,
-        imageUsd: entry.cost.imageUsd,
-        videoUsd: entry.cost.videoUsd,
-        durationMs: entry.durationMs
-      });
-      trimTopRequests(month);
-      ledger.months[monthKey] = month;
-      trimLedgerMonths(ledger.months);
-      await writeLedger(ledger);
     });
 
   return ledgerWriteQueue;
@@ -460,21 +756,36 @@ export const safeRecordUsageCost = async (entry) => {
   }
 };
 
-export const getUsageCostSummary = async ({ month } = {}) => {
+export const getUsageCostSummary = async ({ month, period } = {}) => {
   const ledger = await readLedger();
   const timeZone = ledger.timezone || config.usageCostTimezone || 'UTC';
-  const currentMonth = formatDateParts(new Date(), timeZone).monthKey;
+  const currentParts = formatDateParts(new Date(), timeZone);
+  const currentMonth = currentParts.monthKey;
+  const currentCycle = resolveReportCycle(currentParts.dateKey);
+  const useReportCycle = period === 'cycle';
   const selectedMonth = month || currentMonth;
-  const selected = ledger.months?.[selectedMonth] || emptyMonth(selectedMonth);
+  const selectedPeriod = useReportCycle
+    ? currentCycle
+    : calendarPeriodForMonth(selectedMonth);
+  const selected = useReportCycle
+    ? (ledger.cycles?.[currentCycle.key] || buildCycleFromMonths(ledger, currentCycle))
+    : (ledger.months?.[selectedMonth] || emptyMonth(selectedMonth));
 
   return {
     currency: 'USD',
-    month: selectedMonth,
+    month: selectedPeriod.key,
     currentMonth,
+    currentCycle: currentCycle.key,
+    periodType: selectedPeriod.type,
+    periodStart: selectedPeriod.startDate,
+    periodEnd: selectedPeriod.endDate,
+    periodLabel: selectedPeriod.label,
     startDate: ledger.startDate || config.usageCostReportStartDate || null,
     timezone: timeZone,
     updatedAt: ledger.updatedAt || null,
     months: Object.keys(ledger.months || {}).sort().reverse(),
+    cycles: Object.keys(ledger.cycles || {}).sort().reverse(),
+    journal: ledger.journal || null,
     summary: selected,
     pricingVersion: 'google-public-pricing-2026-04-26',
     pricingModels: Object.keys(GOOGLE_PRICING).sort()

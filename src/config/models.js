@@ -195,6 +195,7 @@ export const config = {
   requestLogViewLimit: parseOptionalPositiveIntEnv('REQUEST_LOG_VIEW_LIMIT', 100),
   requestLogTextLimit: parseOptionalPositiveIntEnv('REQUEST_LOG_TEXT_LIMIT', 12000),
   usageCostLedgerPath: resolveProjectPath(process.env.USAGE_COST_LEDGER_PATH) || path.join(PROJECT_ROOT, 'data/usage-costs.json'),
+  usageCostJournalPath: resolveProjectPath(process.env.USAGE_COST_JOURNAL_PATH) || path.join(PROJECT_ROOT, 'data/usage-cost-events.jsonl'),
   usageCostLedgerMonths: parseOptionalPositiveIntEnv('USAGE_COST_LEDGER_MONTHS', 24),
   usageCostTopRequests: parseOptionalPositiveIntEnv('USAGE_COST_TOP_REQUESTS', 50),
   usageCostReportStartDate: process.env.USAGE_COST_REPORT_START_DATE || '',

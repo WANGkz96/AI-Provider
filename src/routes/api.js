@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { getConfiguredModels, saveConfiguredModels, config } from '../config/models.js';
 import { getRequestLogs, safeAppendRequestLog } from '../requestLog.js';
 import { estimateRunCost, getUsageCostSummary, safeRecordUsageCost } from '../usageCosts.js';
@@ -10,6 +11,7 @@ import { GoogleAdapter } from '../adapters/google.js';
 import { GroqAdapter } from '../adapters/groq.js';
 import { LocalAdapter } from '../adapters/local.js';
 import { ChatterboxAdapter } from '../adapters/chatterbox.js';
+import { VertexOpenAIAdapter } from '../adapters/vertexOpenAI.js';
 import {
   createAccessControlMiddleware,
   createConcurrencyLimiter,
@@ -94,6 +96,7 @@ const toolChoiceSchema = z.union([
 // Initialize Providers
 const providers = {
   google: new GoogleAdapter(config),
+  vertexOpenAI: new VertexOpenAIAdapter(config),
   groq: new GroqAdapter(config),
   local: new LocalAdapter(config),
   chatterbox: new ChatterboxAdapter(config)
@@ -572,6 +575,8 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
   let targetModel = null;
   const writeRunLog = async (entry) => {
     const logEntry = {
+      id: entry.id || randomUUID(),
+      timestamp: entry.timestamp || new Date().toISOString(),
       ...buildRunLogContext({ req, body, targetModel, startedAt }),
       ...entry
     };
