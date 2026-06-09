@@ -196,6 +196,8 @@ const runSchema = z.object({
   topP: z.number().min(0).max(1).optional(),
   maxTokens: z.number().optional(),
   max_tokens: z.number().optional(),
+  maxOutputTokens: z.number().optional(),
+  max_output_tokens: z.number().optional(),
   thinking: z.object({
     budget: z.number().int().min(-1).optional(),
     level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
@@ -651,7 +653,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
 
   try {
     body = runSchema.parse(req.body);
-    const requestedMaxTokens = body.maxTokens ?? body.max_tokens;
+    const requestedMaxTokens = body.maxTokens
+      ?? body.max_tokens
+      ?? body.maxOutputTokens
+      ?? body.max_output_tokens;
     const defaultMaxTokens = config.defaultGenerationTokens > 0
       ? config.defaultGenerationTokens
       : undefined;
