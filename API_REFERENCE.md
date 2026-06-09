@@ -31,20 +31,30 @@
   {
     "models": [
       {
-        "id": "gemma-3-27b-it",
+        "id": "gemma-4-31b-it",
         "provider": "google",
         "available": true,
         "type": "cloud"
       },
       {
-        "id": "gemini-3-flash-preview",
+        "id": "gemini-3.1-flash-lite",
         "provider": "google",
         "available": true,
-        "type": "cloud"
+        "type": "cloud",
+        "aliases": [
+          "models/gemini-3.1-flash-lite",
+          "gemini-3.1-flash-lite-preview",
+          "models/gemini-3.1-flash-lite-preview"
+        ]
       }
     ]
   }
   ```
+
+Model aliases are accepted by `/run` but `/available-models` returns the canonical
+model id for the active Google mode. For example, `gemini-3.1-flash-lite-preview`
+and `models/gemini-3.1-flash-lite-preview` resolve to `gemini-3.1-flash-lite`;
+`gemma-4` resolves to the configured Gemma 4 26B model for the current mode.
 
 ### 3. Run Inference
 Основной метод запуска генерации. Поддерживает стриминг (SSE) и обычный JSON ответ.
@@ -202,6 +212,20 @@ Text responses keep the legacy fields and also include agent-friendly fields:
         "name": "ConductResearch",
         "arguments": {
           "research_topic": "..."
+        },
+        "provider_state": {
+          "role": "model",
+          "parts": [
+            {
+              "functionCall": {
+                "name": "ConductResearch",
+                "args": {
+                  "research_topic": "..."
+                }
+              },
+              "thoughtSignature": "<opaque>"
+            }
+          ]
         }
       }
     ]
@@ -214,7 +238,7 @@ Text responses keep the legacy fields and also include agent-friendly fields:
 Notes:
 - All new fields are optional.
 - Existing requests with `maxTokens`, plain `messages`, `prompt`, and legacy `responseMimeType` / `responseSchema` / `responseJsonSchema` continue to work.
-- For Gemini 3 multi-step tool calling, send `message.parts` or `message.provider_state.parts` back exactly as received from the previous assistant response so thought signatures are preserved.
+- For Gemini 3 multi-step tool calling, send `message.parts`, `message.provider_state.parts`, or the returned `tool_calls[].provider_state` back exactly as received from the previous assistant response so thought signatures are preserved.
 - `stream: false` is required when using `output`, `tools`, `tool_choice`, assistant `tool_calls`, or `tool` messages.
 - If the client omits `maxTokens`, `/run` uses the server default budget (`DEFAULT_GENERATION_TOKENS`, legacy alias `MAX_GENERATION_TOKENS`). If `MAX_GENERATION_TOKENS_HARD_CAP` is set, `/run` clamps the final budget to that hard cap and exposes `requestedMaxTokens`, `defaultMaxTokens`, `appliedMaxTokens`, and `hardCapMaxTokens` in response metadata.
 
@@ -406,7 +430,7 @@ Response additions for Nano Banana:
 #### Example Request (Gemini 3 Thinking + Stream)
 ```json
 {
-  "model": "gemini-3.1-flash-lite-preview",
+  "model": "gemini-3.1-flash-lite",
   "messages": [
     { "role": "system", "content": "You are a careful assistant." },
     { "role": "user", "content": "Solve this step by step and explain the final answer clearly." }

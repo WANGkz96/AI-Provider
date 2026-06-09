@@ -33,11 +33,27 @@ const GOOGLE_PRICING = {
     inputAudioPer1M: 1,
     outputPer1M: 3
   },
+  'gemini-3.1-flash-lite': {
+    source: 'Google Vertex AI / Gemini API pricing, Standard tier',
+    inputPer1M: 0.25,
+    inputAudioPer1M: 0.5,
+    outputPer1M: 1.5
+  },
   'gemini-3.1-flash-lite-preview': {
     source: 'Google Vertex AI / Gemini API pricing, Standard tier',
     inputPer1M: 0.25,
     inputAudioPer1M: 0.5,
     outputPer1M: 1.5
+  },
+  'gemma-4-26b-a4b-it': {
+    source: 'Google Agent Platform MaaS / Gemini API pricing, Standard tier',
+    inputPer1M: 0.15,
+    outputPer1M: 0.6
+  },
+  'gemma-4-26b-a4b-it-maas': {
+    source: 'Google Agent Platform MaaS / Gemini API pricing, Standard tier',
+    inputPer1M: 0.15,
+    outputPer1M: 0.6
   },
   'gemini-3.5-flash': {
     source: 'Google Agent Platform pricing, Standard tier',
@@ -693,7 +709,7 @@ const buildCostJournalEvent = ({ entry, monthKey, dateKey, cycle }) => ({
   durationMs: entry.durationMs ?? null,
   usage: entry.usage || entry.response?.usage || null,
   cost: entry.cost,
-  costSchemaVersion: 'google-public-pricing-2026-04-26'
+  costSchemaVersion: 'google-public-pricing-2026-06-10'
 });
 
 export const recordUsageCost = async (entry) => {
@@ -787,7 +803,7 @@ export const getUsageCostSummary = async ({ month, period } = {}) => {
     cycles: Object.keys(ledger.cycles || {}).sort().reverse(),
     journal: ledger.journal || null,
     summary: selected,
-    pricingVersion: 'google-public-pricing-2026-04-26',
+    pricingVersion: 'google-public-pricing-2026-06-10',
     pricingModels: Object.keys(GOOGLE_PRICING).sort()
   };
 };

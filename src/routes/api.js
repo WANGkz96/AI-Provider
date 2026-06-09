@@ -32,7 +32,7 @@ const toolCallSchema = z.object({
   id: z.string().min(1).optional(),
   name: z.string().min(1),
   arguments: z.any().optional()
-});
+}).passthrough();
 
 const providerStateSchema = z.object({
   role: z.string().optional(),
@@ -117,6 +117,60 @@ const runConcurrencyLimiter = createConcurrencyLimiter({
 
 // Log loaded providers
 console.log('Loaded providers:', Object.keys(providers));
+
+function normalizeModelLookupKey(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, '')
+    .replace(/_/g, '-');
+}
+
+function getModelLookupValues(model) {
+  return [
+    model.id,
+    model.apiModelId,
+    model.aiStudioApiModelId,
+    model.vertexApiModelId,
+    ...(Array.isArray(model.aliases) ? model.aliases : [])
+  ].filter(Boolean);
+}
+
+function findConfiguredModel(models, requestedModel) {
+  const requestedRaw = String(requestedModel || '').trim();
+  const requestedNormalized = normalizeModelLookupKey(requestedRaw);
+
+  return models.find((model) => getModelLookupValues(model).some((value) => (
+    String(value).trim() === requestedRaw
+    || normalizeModelLookupKey(value) === requestedNormalized
+  )));
+}
+
+function resolveApiModelIdForMode(model) {
+  if (model.provider === 'google') {
+    return config.googleUseVertex
+      ? (model.vertexApiModelId || model.apiModelId || model.id)
+      : (model.aiStudioApiModelId || model.apiModelId || model.id);
+  }
+
+  return model.apiModelId || model.id;
+}
+
+function getCurrentGoogleMode() {
+  return config.googleUseVertex ? 'vertex' : 'aiStudio';
+}
+
+function isModelAvailableInCurrentMode(model) {
+  if (model.provider !== 'google' || !Array.isArray(model.availableIn) || model.availableIn.length === 0) {
+    return true;
+  }
+
+  return model.availableIn.includes(getCurrentGoogleMode());
+}
 
 // --- Validation Schemas ---
 const runSchema = z.object({
@@ -462,6 +516,10 @@ router.get('/available-models', requireAccessKey, async (req, res) => {
   const validModels = [];
 
   for (const m of models) {
+    if (!isModelAvailableInCurrentMode(m)) {
+      continue;
+    }
+
     const provider = providers[m.provider];
     let available = false;
     let additions = {};
@@ -529,6 +587,10 @@ router.get('/available-models', requireAccessKey, async (req, res) => {
             available: available,
             type: m.type || 'text'
         };
+
+        if (Array.isArray(m.aliases) && m.aliases.length > 0) {
+            modelObj.aliases = m.aliases;
+        }
         
         // Only add additions if not empty
         if (Object.keys(additions).length > 0) {
@@ -612,7 +674,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     const resolvedStrictJson = body.strictJson ?? (body.output?.type === 'json_schema' ? true : undefined);
 
     const models = getConfiguredModels();
-    targetModel = models.find(m => m.id === body.model);
+    targetModel = findConfiguredModel(models, body.model);
 
     if (!targetModel) {
       await writeRunLog({
@@ -621,6 +683,17 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         error: `Model '${body.model}' not found in configuration.`
       });
       return res.status(404).json({ error: `Model '${body.model}' not found in configuration.` });
+    }
+
+    if (!isModelAvailableInCurrentMode(targetModel)) {
+      const googleMode = getCurrentGoogleMode();
+      const message = `Model '${targetModel.id}' is not available in Google ${googleMode} mode.`;
+      await writeRunLog({
+        ok: false,
+        statusCode: 400,
+        error: message
+      });
+      return res.status(400).json({ error: message });
     }
 
     const provider = providers[targetModel.provider];
@@ -647,7 +720,8 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     // Unified Generation Params
     const generateParams = {
         model: targetModel.id,
-        apiModelId: targetModel.apiModelId,
+        requestedModel: body.model,
+        apiModelId: resolveApiModelIdForMode(targetModel),
         adapterMode: targetModel.adapterMode,
         type: targetModel.type || 'text',
         baseUrl: targetModel.baseUrl, // Important for local models

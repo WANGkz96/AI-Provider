@@ -356,6 +356,11 @@ export class GoogleAdapter extends BaseAdapter {
         toolNameById.set(toolCall.id, toolCall.name);
       }
 
+      const preservedPart = this.getProviderFunctionCallPart(toolCall);
+      if (preservedPart) {
+        return preservedPart;
+      }
+
       return {
         functionCall: this.removeUndefined({
           id: toolCall.id,
@@ -630,9 +635,13 @@ export class GoogleAdapter extends BaseAdapter {
 
   formatGeminiContentResponse(response, { responseMimeType } = {}) {
     const content = this.extractGeminiText(response);
-    const toolCalls = this.mapGeminiFunctionCalls(response?.functionCalls);
     const candidateContent = response?.candidates?.[0]?.content;
     const parts = this.cloneParts(candidateContent?.parts);
+    const toolCalls = this.mapGeminiFunctionCalls(
+      response?.functionCalls,
+      parts,
+      candidateContent?.role ?? 'model'
+    );
     const providerState = parts.length > 0
       ? {
           role: candidateContent?.role ?? 'model',
@@ -745,10 +754,27 @@ export class GoogleAdapter extends BaseAdapter {
         return {
           id,
           name,
-          arguments: this.normalizeToolArguments(toolCall?.arguments)
+          arguments: this.normalizeToolArguments(toolCall?.arguments),
+          providerState: toolCall?.provider_state || toolCall?.providerState || null
         };
       })
       .filter(Boolean);
+  }
+
+  getProviderFunctionCallPart(toolCall) {
+    const providerState = toolCall?.providerState || toolCall?.provider_state;
+    const candidates = [
+      providerState?.part,
+      ...(Array.isArray(providerState?.parts) ? providerState.parts : [])
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate?.functionCall) {
+        return this.cloneParts([candidate])[0];
+      }
+    }
+
+    return null;
   }
 
   normalizeToolArguments(argumentsValue) {
@@ -867,7 +893,7 @@ export class GoogleAdapter extends BaseAdapter {
     };
   }
 
-  mapGeminiFunctionCalls(functionCalls) {
+  mapGeminiFunctionCalls(functionCalls, parts = [], role = 'model') {
     if (!Array.isArray(functionCalls) || functionCalls.length === 0) {
       return [];
     }
@@ -879,13 +905,38 @@ export class GoogleAdapter extends BaseAdapter {
           return null;
         }
 
+        const id = this.normalizeText(call?.id).trim() || `call_${index + 1}`;
+        const functionCallPart = this.findFunctionCallPart({ parts, id, name });
+
         return {
-          id: this.normalizeText(call?.id).trim() || `call_${index + 1}`,
+          id,
           name,
-          arguments: this.normalizeToolArguments(call?.args)
+          arguments: this.normalizeToolArguments(call?.args),
+          provider_state: functionCallPart
+            ? {
+                role,
+                part: functionCallPart,
+                parts: [functionCallPart]
+              }
+            : undefined
         };
       })
       .filter(Boolean);
+  }
+
+  findFunctionCallPart({ parts, id, name }) {
+    const functionCallPart = (parts || []).find((part) => {
+      const call = part?.functionCall;
+      if (!call) {
+        return false;
+      }
+
+      const callId = this.normalizeText(call.id).trim();
+      const callName = this.normalizeText(call.name).trim();
+      return (id && callId === id) || callName === name;
+    });
+
+    return functionCallPart ? this.cloneParts([functionCallPart])[0] : null;
   }
 
   stripDataUrlPrefix(value) {

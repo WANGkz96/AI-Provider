@@ -4,7 +4,46 @@
     "provider": "google",
     "apiModelId": "gemma-3-27b-it",
     "adapterMode": "native",
-    "type": "text"
+    "type": "text",
+    "aiStudioApiModelId": "gemma-3-27b-it",
+    "aliases": [
+      "models/gemma-3-27b-it"
+    ]
+  },
+  {
+    "id": "gemma-4-26b-a4b-it",
+    "provider": "google",
+    "apiModelId": "gemma-4-26b-a4b-it",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemma-4-26b-a4b-it",
+    "vertexApiModelId": "gemma-4-26b-a4b-it-maas",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "gemma-4",
+      "gemma-4-26b",
+      "models/gemma-4-26b-a4b-it",
+      "gemma-4-26b-a4b-it-maas",
+      "models/gemma-4-26b-a4b-it-maas"
+    ]
+  },
+  {
+    "id": "gemma-4-31b-it",
+    "provider": "google",
+    "apiModelId": "gemma-4-31b-it",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemma-4-31b-it",
+    "availableIn": [
+      "aiStudio"
+    ],
+    "aliases": [
+      "gemma-4-31b",
+      "models/gemma-4-31b-it"
+    ]
   },
   {
     "id": "gemini-2.5-flash",
@@ -25,21 +64,41 @@
     "provider": "google",
     "apiModelId": "gemini-3-flash-preview",
     "adapterMode": "openai",
-    "type": "text"
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3-flash-preview",
+    "vertexApiModelId": "gemini-3-flash-preview",
+    "aliases": [
+      "gemini-3-flash",
+      "models/gemini-3-flash-preview"
+    ]
   },
   {
-    "id": "gemini-3.1-flash-lite-preview",
+    "id": "gemini-3.1-flash-lite",
     "provider": "google",
-    "apiModelId": "gemini-3.1-flash-lite-preview",
+    "apiModelId": "gemini-3.1-flash-lite",
     "adapterMode": "openai",
-    "type": "text"
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3.1-flash-lite",
+    "vertexApiModelId": "gemini-3.1-flash-lite",
+    "aliases": [
+      "models/gemini-3.1-flash-lite",
+      "gemini-3.1-flash-lite-preview",
+      "models/gemini-3.1-flash-lite-preview",
+      "gemini-3.1-flash-lite-05-2026"
+    ]
   },
   {
     "id": "gemini-3.5-flash",
     "provider": "google",
     "apiModelId": "gemini-3.5-flash",
     "adapterMode": "openai",
-    "type": "text"
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3.5-flash",
+    "vertexApiModelId": "gemini-3.5-flash",
+    "aliases": [
+      "models/gemini-3.5-flash",
+      "gemini-3.5-flash-05-2026"
+    ]
   },
   {
     "id": "gemini-3-pro-preview",
