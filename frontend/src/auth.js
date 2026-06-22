@@ -4,11 +4,18 @@ const ACCESS_KEY_STORAGE_KEY = 'ai-provider-access-key';
 
 let promptInFlight = null;
 
-const normalizeAccessKey = (value) => (
-  typeof value === 'string'
-    ? value.trim()
-    : ''
-);
+const normalizeAccessKey = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .trim()
+    .replace(/^authorization\s*:\s*/i, '')
+    .replace(/^x-api-key\s*:\s*/i, '')
+    .replace(/^bearer\s+/i, '')
+    .trim();
+};
 
 const readStoredAccessKey = () => {
   if (typeof window === 'undefined') {
