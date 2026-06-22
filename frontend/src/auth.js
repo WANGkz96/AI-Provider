@@ -69,15 +69,17 @@ export const ensureAccessKey = async (forcePrompt = false) => {
   promptInFlight = (async () => {
     let candidateAccessKey = forcePrompt ? '' : readStoredAccessKey();
     let promptMessage = 'Вставь access key для AI Provider';
+    let attempts = 0;
+    const maxAttempts = 3;
 
-    while (true) {
+    while (attempts < maxAttempts) {
       if (!candidateAccessKey) {
         candidateAccessKey = normalizeAccessKey(window.prompt(promptMessage));
       }
 
       if (!candidateAccessKey) {
-        promptMessage = 'Нужен access key. Вставь access key для AI Provider';
-        continue;
+        clearStoredAccessKey();
+        throw new Error('AI Provider access key is required');
       }
 
       const isValid = await verifyAccessKey(candidateAccessKey).catch(() => false);
@@ -89,7 +91,10 @@ export const ensureAccessKey = async (forcePrompt = false) => {
       clearStoredAccessKey();
       candidateAccessKey = '';
       promptMessage = 'Ключ не подошёл. Вставь access key для AI Provider ещё раз';
+      attempts += 1;
     }
+
+    throw new Error('AI Provider access key was rejected');
   })();
 
   try {

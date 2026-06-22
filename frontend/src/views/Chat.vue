@@ -1378,7 +1378,6 @@ const init = async () => {
     } finally {
         loadingModels.value = false;
         isUrlSyncReady.value = true;
-        await syncStateToQuery();
     }
 };
 
