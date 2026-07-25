@@ -1214,25 +1214,26 @@ export class GoogleAdapter extends BaseAdapter {
       throw new Error('Gemini TTS requires a valid API key or Vertex AI config');
     }
 
-    let targetModel = model;
-    if (this.useVertex && targetModel.includes('-preview-tts')) {
-      targetModel = targetModel.replace('-preview-tts', '-tts');
-    }
-
     const promptText = prompt || messages?.[messages.length - 1]?.content;
     if (!promptText) {
       throw new Error('No prompt provided for TTS generation');
     }
 
     const ttsMode = options?.ttsMode === 'multi' ? 'multi' : 'single';
+    if (ttsMode === 'multi' && model === 'gemini-2.5-flash-lite-preview-tts') {
+      throw new Error('gemini-2.5-flash-lite-preview-tts supports single-speaker speech only');
+    }
+
     const sampleRateHz = 24000;
+    const languageCode = this.normalizeText(options?.languageId).trim() || undefined;
     let speechConfig;
     let usedVoice = null;
     let usedSpeakers = null;
 
     if (ttsMode === 'multi') {
       const normalizedSpeakers = this.normalizeGeminiTtsSpeakers(options?.speakers);
-      speechConfig = {
+      speechConfig = this.removeUndefined({
+        languageCode,
         multiSpeakerVoiceConfig: {
           speakerVoiceConfigs: normalizedSpeakers.map((speakerConfig) => ({
             speaker: speakerConfig.speaker,
@@ -1243,22 +1244,23 @@ export class GoogleAdapter extends BaseAdapter {
             }
           }))
         }
-      };
+      });
       usedSpeakers = normalizedSpeakers;
     } else {
       const voiceName = options?.voiceName || 'Kore';
-      speechConfig = {
+      speechConfig = this.removeUndefined({
+        languageCode,
         voiceConfig: {
           prebuiltVoiceConfig: {
             voiceName
           }
         }
-      };
+      });
       usedVoice = voiceName;
     }
 
     const response = await this.imageAI.models.generateContent({
-      model: targetModel,
+      model,
       contents: [
         {
           role: 'user',
@@ -1296,6 +1298,7 @@ export class GoogleAdapter extends BaseAdapter {
         model,
         sourceMimeType: inlineAudio.mimeType || 'audio/pcm',
         sampleRateHz,
+        languageCode,
         voice: usedVoice,
         speakers: usedSpeakers
       }
@@ -1434,6 +1437,13 @@ export class GoogleAdapter extends BaseAdapter {
   async generateGeminiImages({ model, prompt, messages, media, imageOptions, imageMode }) {
     const imageSize = imageOptions?.size || '1K';
     const aspectRatio = imageOptions?.aspectRatio;
+    if (
+      model === 'gemini-3.1-flash-lite-image'
+      && !['1K', '1024', '1024px'].includes(String(imageSize))
+    ) {
+      throw new Error('gemini-3.1-flash-lite-image supports 1K images only');
+    }
+
     const supportsImageSize = !model.includes('gemini-2.5-flash-image');
     const supportsText = !model.includes('gemini-2.5-flash-image');
     const responseModalities = supportsText ? ['IMAGE', 'TEXT'] : ['IMAGE'];

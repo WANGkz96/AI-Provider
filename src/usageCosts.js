@@ -97,16 +97,30 @@ const GOOGLE_PRICING = {
     inputAudioPer1M: 0.3,
     outputPer1M: 0.4
   },
-  'gemini-2.5-flash-image': {
-    source: 'Google Gemini API pricing, Standard tier',
-    inputPer1M: 0.3,
+  'gemini-3.1-flash-lite-image': {
+    source: 'Google Agent Platform pricing, Standard tier',
+    inputPer1M: 0.25,
+    outputPer1M: 1.5,
     outputImageUsd: {
-      default: 0.039,
-      '1K': 0.039
+      default: 0.034,
+      '1K': 0.034
     }
   },
-  'gemini-3-pro-image-preview': {
-    source: 'Google Vertex AI / Gemini API pricing, Standard tier',
+  'gemini-3.1-flash-image': {
+    source: 'Google Agent Platform pricing, Standard tier',
+    inputPer1M: 0.5,
+    outputPer1M: 3,
+    outputImageUsd: {
+      default: 0.067,
+      '0.5K': 0.045,
+      '512': 0.045,
+      '1K': 0.067,
+      '2K': 0.101,
+      '4K': 0.15
+    }
+  },
+  'gemini-3-pro-image': {
+    source: 'Google Agent Platform pricing, Standard tier',
     inputPer1M: 2,
     outputPer1M: 12,
     outputImageUsd: {
@@ -116,48 +130,29 @@ const GOOGLE_PRICING = {
       '4K': 0.24
     }
   },
-  'gemini-3.1-flash-image-preview': {
-    source: 'Google Vertex AI / Gemini API pricing, Standard tier',
-    inputPer1M: 0.5,
-    outputPer1M: 3,
-    outputImageUsd: {
-      default: 0.067,
-      '0.5K': 0.045,
-      '512': 0.045,
-      '1K': 0.067,
-      '2K': 0.101,
-      '4K': 0.151
-    }
-  },
-  'gemini-2.5-flash-preview-tts': {
-    source: 'Google Gemini API pricing, Standard tier',
-    inputPer1M: 0.5,
-    outputAudioPer1M: 10,
-    audioTokensPerSecond: 25
-  },
   'gemini-2.5-flash-tts': {
-    source: 'Google Gemini API pricing, Standard tier',
+    source: 'Google Cloud TTS / Vertex AI pricing, Standard tier',
     inputPer1M: 0.5,
     outputAudioPer1M: 10,
     audioTokensPerSecond: 25
   },
-  'gemini-3.1-flash-tts-preview': {
-    source: 'Google Gemini API pricing, Standard tier',
+  'gemini-2.5-flash-lite-preview-tts': {
+    source: 'Google Cloud TTS / Vertex AI pricing, Standard tier',
+    inputPer1M: 0.5,
+    outputAudioPer1M: 10,
+    audioTokensPerSecond: 25
+  },
+  'gemini-2.5-pro-tts': {
+    source: 'Google Cloud TTS / Vertex AI pricing, Standard tier',
     inputPer1M: 1,
     outputAudioPer1M: 20,
     audioTokensPerSecond: 25
   },
-  'imagen-4.0-fast-generate-001': {
-    source: 'Google Gemini API pricing, Standard tier',
-    outputImageUsd: { default: 0.02 }
-  },
-  'imagen-4.0-generate-001': {
-    source: 'Google Gemini API pricing, Standard tier',
-    outputImageUsd: { default: 0.04 }
-  },
-  'imagen-4.0-ultra-generate-001': {
-    source: 'Google Gemini API pricing, Standard tier',
-    outputImageUsd: { default: 0.06 }
+  'gemini-3.1-flash-tts-preview': {
+    source: 'Google Cloud TTS / Vertex AI pricing, Standard tier',
+    inputPer1M: 1,
+    outputAudioPer1M: 20,
+    audioTokensPerSecond: 25
   },
   'veo-3.1-generate-preview': {
     source: 'Google Gemini API pricing, Standard tier',
@@ -819,7 +814,7 @@ export const getUsageCostSummary = async ({ month, period } = {}) => {
     cycles: Object.keys(ledger.cycles || {}).sort().reverse(),
     journal: ledger.journal || null,
     summary: selected,
-    pricingVersion: 'google-public-pricing-2026-06-10',
+    pricingVersion: 'google-public-pricing-2026-07-25',
     pricingModels: Object.keys(GOOGLE_PRICING).sort()
   };
 };
