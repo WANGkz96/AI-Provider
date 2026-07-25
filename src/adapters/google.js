@@ -96,6 +96,7 @@ export class GoogleAdapter extends BaseAdapter {
     const config = {
       temperature: options?.temperature,
       topP: options?.topP,
+      topK: options?.topK,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
       responseSchema: options?.responseJsonSchema ? undefined : options?.responseSchema,
@@ -1068,6 +1069,7 @@ export class GoogleAdapter extends BaseAdapter {
     const config = {
       temperature: options?.temperature,
       topP: options?.topP,
+      topK: options?.topK,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
       responseSchema: options?.responseJsonSchema ? undefined : options?.responseSchema,
@@ -1109,6 +1111,7 @@ export class GoogleAdapter extends BaseAdapter {
       effectiveConfig: this.removeUndefined({
         temperature: config.temperature,
         topP: config.topP,
+        topK: config.topK,
         maxOutputTokens: config.maxOutputTokens,
         thinkingConfig: config.thinkingConfig
       })

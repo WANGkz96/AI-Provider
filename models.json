@@ -101,6 +101,38 @@
     ]
   },
   {
+    "id": "gemini-3.6-flash",
+    "provider": "google",
+    "apiModelId": "gemini-3.6-flash",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3.6-flash",
+    "vertexApiModelId": "gemini-3.6-flash",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-3.6-flash"
+    ]
+  },
+  {
+    "id": "gemini-3.5-flash-lite",
+    "provider": "google",
+    "apiModelId": "gemini-3.5-flash-lite",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3.5-flash-lite",
+    "vertexApiModelId": "gemini-3.5-flash-lite",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-3.5-flash-lite"
+    ]
+  },
+  {
     "id": "gemini-3-pro-preview",
     "provider": "google",
     "apiModelId": "gemini-3-pro-preview",

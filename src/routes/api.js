@@ -194,6 +194,9 @@ const runSchema = z.object({
   stream: z.boolean().optional().default(false),
   temperature: z.number().min(0).max(2).optional(),
   topP: z.number().min(0).max(1).optional(),
+  top_p: z.number().min(0).max(1).optional(),
+  topK: z.number().min(0).optional(),
+  top_k: z.number().min(0).optional(),
   maxTokens: z.number().optional(),
   max_tokens: z.number().optional(),
   maxOutputTokens: z.number().optional(),
@@ -201,8 +204,19 @@ const runSchema = z.object({
   thinking: z.object({
     budget: z.number().int().min(-1).optional(),
     level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
-    includeThoughts: z.boolean().default(false)
+    thinkingBudget: z.number().int().min(-1).optional(),
+    thinking_budget: z.number().int().min(-1).optional(),
+    thinkingLevel: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+    thinking_level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+    includeThoughts: z.boolean().optional(),
+    include_thoughts: z.boolean().optional()
   }).optional(),
+  thinkingBudget: z.number().int().min(-1).optional(),
+  thinking_budget: z.number().int().min(-1).optional(),
+  thinkingLevel: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+  thinking_level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+  includeThoughts: z.boolean().optional(),
+  include_thoughts: z.boolean().optional(),
   responseMimeType: z.enum(['text/plain', 'application/json']).optional(),
   responseSchema: z.record(z.string(), z.any()).optional(),
   responseJsonSchema: z.any().optional(),
@@ -667,6 +681,33 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     const appliedMaxTokens = hardCapMaxTokens
       ? Math.min(resolvedMaxTokens ?? hardCapMaxTokens, hardCapMaxTokens)
       : resolvedMaxTokens;
+    const resolvedTopP = body.topP ?? body.top_p;
+    const resolvedTopK = body.topK ?? body.top_k;
+    const thinkingInput = body.thinking;
+    const resolvedThinking = (thinkingInput
+      || body.thinkingBudget !== undefined
+      || body.thinking_budget !== undefined
+      || body.thinkingLevel !== undefined
+      || body.thinking_level !== undefined
+      || body.includeThoughts !== undefined
+      || body.include_thoughts !== undefined)
+      ? {
+          budget: thinkingInput?.budget
+            ?? thinkingInput?.thinkingBudget
+            ?? thinkingInput?.thinking_budget
+            ?? body.thinkingBudget
+            ?? body.thinking_budget,
+          level: thinkingInput?.level
+            ?? thinkingInput?.thinkingLevel
+            ?? thinkingInput?.thinking_level
+            ?? body.thinkingLevel
+            ?? body.thinking_level,
+          includeThoughts: thinkingInput?.includeThoughts
+            ?? thinkingInput?.include_thoughts
+            ?? body.includeThoughts
+            ?? body.include_thoughts
+        }
+      : undefined;
     const resolvedResponseMimeType = body.output?.type === 'json_schema'
       ? 'application/json'
       : (body.output?.type === 'text' ? 'text/plain' : body.responseMimeType);
@@ -743,9 +784,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         stream: body.stream,
         options: {
             temperature: body.temperature,
-            topP: body.topP,
+            topP: resolvedTopP,
+            topK: resolvedTopK,
             maxTokens: appliedMaxTokens,
-            thinking: body.thinking,
+            thinking: resolvedThinking,
             responseMimeType: resolvedResponseMimeType,
             responseSchema: resolvedResponseSchema,
             responseJsonSchema: resolvedResponseJsonSchema,
