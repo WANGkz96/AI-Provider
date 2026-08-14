@@ -101,6 +101,24 @@
     ]
   },
   {
+    "id": "gemini-3.7-flash",
+    "provider": "google",
+    "apiModelId": "gemini-3.7-flash",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3.7-flash",
+    "vertexApiModelId": "gemini-3.7-flash",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-3.7-flash",
+      "gemini-3.7-flash-preview",
+      "models/gemini-3.7-flash-preview"
+    ]
+  },
+  {
     "id": "gemini-3.6-flash",
     "provider": "google",
     "apiModelId": "gemini-3.6-flash",

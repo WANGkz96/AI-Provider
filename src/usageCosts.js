@@ -63,6 +63,14 @@ const GOOGLE_PRICING = {
     outputLongPer1M: 9,
     longContextThreshold: 200_000
   },
+  'gemini-3.7-flash': {
+    source: 'Google Gemini 3.7 Flash introductory pricing through 2026-12-31',
+    inputPer1M: 0.75,
+    inputLongPer1M: 0.75,
+    outputPer1M: 3.75,
+    outputLongPer1M: 3.75,
+    longContextThreshold: 200_000
+  },
   'gemini-3.6-flash': {
     source: 'Google Vertex AI / Gemini API pricing, Standard tier',
     inputPer1M: 1.5,
