@@ -300,7 +300,7 @@ Frontend migration from old `<think>...</think>` parsing:
 }
 ```
 
-#### TTS Object (New)
+#### TTS and Music Audio Object (New)
 Используется для моделей `type=audio`.
 
 Для Chatterbox:
@@ -331,6 +331,12 @@ Frontend migration from old `<think>...</think>` parsing:
   ]
 }
 ```
+
+#### Lyria 3 Music
+
+Use `lyria-3-clip-preview` for a 30-second clip or `lyria-3-pro-preview` for a full song. Send a `prompt` directly; the `tts` object is not required. Image references can be supplied through `media`.
+
+Lyria responses return MP3 audio in `audio.mimeType` and generated lyric or structure text in `lyrics` and `metadata.lyrics`.
 
 #### Image Object (New)
 Используется для image моделей (Imagen и Nano Banana).

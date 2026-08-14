@@ -56,7 +56,7 @@ export class GoogleAdapter extends BaseAdapter {
   }
 
   async generate(params) {
-    const { model, apiModelId, options, adapterMode, type, media } = params;
+    const { model, apiModelId, options, adapterMode, type, audioMode, media } = params;
 
     // Use apiModelId from config if available, fallback to 'model' ID
     let targetModel = apiModelId || model;
@@ -75,6 +75,9 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     if (type === 'audio') {
+      if (audioMode === 'lyria') {
+        return this.generateLyriaMusic({ ...params, model: targetModel });
+      }
       return this.generateGeminiTtsAudio({ ...params, model: targetModel });
     }
 
@@ -1206,6 +1209,53 @@ export class GoogleAdapter extends BaseAdapter {
       outputTokens: hasOutputTokens ? ((candidateTokens ?? 0) + (thoughtsTokens ?? 0)) : null,
       totalTokens: usageMetadata.totalTokenCount ?? null,
       raw: usageMetadata
+    };
+  }
+
+  async generateLyriaMusic({ model, prompt, messages, media }) {
+    if (!this.genAI) {
+      throw new Error('Lyria music generation requires a valid Vertex AI configuration');
+    }
+
+    const { contents, systemInstruction } = await this.buildGeminiRequestContents({
+      prompt,
+      messages,
+      media
+    });
+
+    const config = this.removeUndefined({
+      responseModalities: ['AUDIO', 'TEXT'],
+      systemInstruction
+    });
+
+    const response = await this.genAI.models.generateContent({
+      model,
+      contents,
+      config
+    });
+
+    const inlineAudio = this.extractGeminiInlineAudio(response);
+    if (!inlineAudio?.data) {
+      throw new Error('Lyria returned no audio payload');
+    }
+
+    const textOutput = this.extractGeminiText(response).trim() || null;
+    const isClip = model.includes('clip');
+
+    return {
+      type: 'audio',
+      data: inlineAudio.data,
+      mimeType: inlineAudio.mimeType || 'audio/mp3',
+      lyrics: textOutput,
+      usage: this.mapNativeUsage(response?.usageMetadata),
+      metadata: {
+        mode: 'lyria',
+        model,
+        sourceMimeType: inlineAudio.mimeType || 'audio/mp3',
+        sampleRateHz: 44100,
+        duration: isClip ? 30 : null,
+        lyrics: textOutput
+      }
     };
   }
 

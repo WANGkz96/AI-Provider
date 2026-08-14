@@ -425,6 +425,7 @@ function buildResponseLogPayload(payload) {
         mimeType: payload.audio.mimeType,
         dataLength: payload.audio.data?.length || 0
       } : null,
+      lyrics: payload.lyrics,
       metadata: payload.metadata
     };
   }
@@ -770,6 +771,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         apiModelId: resolveApiModelIdForMode(targetModel),
         adapterMode: targetModel.adapterMode,
         type: targetModel.type || 'text',
+        audioMode: targetModel.audioMode,
         baseUrl: targetModel.baseUrl, // Important for local models
         imageMode: targetModel.imageMode,
         videoMode: targetModel.videoMode,
@@ -919,6 +921,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
                       data: response.data,
                       mimeType: response.mimeType || 'audio/wav'
                   } : null,
+                  lyrics: response.lyrics || response.metadata?.lyrics || null,
                   metadata: {
                       ...(response.metadata || {}),
                       mode: response.metadata?.mode || targetModel.audioMode || (targetModel.provider === 'google' ? 'gemini-tts' : (targetModel.provider === 'chatterbox' ? 'chatterbox' : null)),

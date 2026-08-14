@@ -245,6 +245,12 @@
                     </div>
                 </template>
 
+                <template v-else-if="currentAudioMode === 'lyria'">
+                    <div class="rounded border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-400">
+                        Lyria 3 music generation. Use the prompt below to describe the genre, instruments, tempo, vocals, lyrics, and structure.
+                    </div>
+                </template>
+
                 <template v-else>
                 <div>
                    <label class="text-xs font-medium text-slate-400 block mb-1.5">Voice Sample</label>
@@ -723,12 +729,12 @@
                              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                             </svg>
-                            Text to Speech
+                            {{ currentAudioMode === 'lyria' ? 'Music Generation' : 'Text to Speech' }}
                         </h2>
                         
                         <textarea 
                             v-model="ttsInput"
-                            placeholder="Enter text you want to synthesize..."
+                            :placeholder="currentAudioMode === 'lyria' ? 'Describe the music: genre, instruments, tempo, vocals, lyrics, and structure...' : 'Enter text you want to synthesize...'"
                             class="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder:text-slate-600 focus:ring-2 focus:ring-purple-500/50 outline-none resize-none text-lg mb-4"
                         ></textarea>
                         
@@ -738,8 +744,8 @@
                                 :disabled="!ttsInput.trim() || isGenerating"
                                 class="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl font-medium shadow-lg shadow-purple-900/20 transition-all flex items-center gap-2"
                             >
-                                <span v-if="isGenerating">Synthesizing...</span>
-                                <span v-else>Generate Audio</span>
+                                <span v-if="isGenerating">{{ currentAudioMode === 'lyria' ? 'Generating music...' : 'Synthesizing...' }}</span>
+                                <span v-else>{{ currentAudioMode === 'lyria' ? 'Generate Music' : 'Generate Audio' }}</span>
                                 <svg v-if="isGenerating" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                             </button>
                         </div>
@@ -757,6 +763,7 @@
                              </div>
                              <div class="flex-1 min-w-0">
                                  <p class="text-sm text-slate-200 truncate mb-1">"{{ result.text }}"</p>
+                                 <p v-if="result.lyrics" class="text-xs text-slate-400 line-clamp-3 mb-1">{{ result.lyrics }}</p>
                                  <div class="text-xs text-slate-500 flex gap-2 flex-wrap">
                                      <span v-if="result.metadata?.mode">{{ result.metadata.mode }}</span>
                                      <span v-if="result.metadata?.voice">{{ result.metadata.voice }}</span>
@@ -987,6 +994,7 @@ const currentAudioMode = computed(() => {
 
 const audioModeLabel = computed(() => {
     if (currentAudioMode.value === 'gemini-tts') return 'Gemini 2.5 TTS';
+    if (currentAudioMode.value === 'lyria') return 'Lyria 3 Music';
     if (currentAudioMode.value === 'chatterbox') return 'Chatterbox';
     return currentAudioMode.value || 'Audio';
 });
@@ -2039,9 +2047,12 @@ const generateAudio = async () => {
         const payload = {
             model: selectedModel.value,
             prompt: ttsInput.value,
-            tts: ttsPayload,
             stream: false // Audio is not streamed yet
         };
+
+        if (currentAudioMode.value !== 'lyria') {
+            payload.tts = ttsPayload;
+        }
 
         const res = await axios.post('/run', payload);
         
@@ -2055,6 +2066,7 @@ const generateAudio = async () => {
 
             audioResults.value.unshift({
                 text: ttsInput.value,
+                lyrics: res.data.lyrics || res.data.metadata?.lyrics || null,
                 audioUrl: res.data.audioUrl,
                 playbackUrl,
                 metadata: res.data.metadata
@@ -2063,8 +2075,8 @@ const generateAudio = async () => {
             throw new Error('Unexpected response type from audio model');
         }
     } catch (e) {
-        console.error('TTS Failed', e);
-        alert('TTS Failed: ' + (e.response?.data?.error || e.message));
+        console.error('Audio generation failed', e);
+        alert('Audio generation failed: ' + (e.response?.data?.error || e.message));
     } finally {
         isGenerating.value = false;
     }

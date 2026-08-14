@@ -162,6 +162,14 @@ const GOOGLE_PRICING = {
     outputAudioPer1M: 20,
     audioTokensPerSecond: 25
   },
+  'lyria-3-clip-preview': {
+    source: 'Google Cloud Lyria pricing, standard online generation',
+    requestUsd: 0.04
+  },
+  'lyria-3-pro-preview': {
+    source: 'Google Cloud Lyria pricing, standard online generation',
+    requestUsd: 0.08
+  },
   'veo-3.1-generate-preview': {
     source: 'Google Gemini API pricing, Standard tier',
     outputVideoSecondUsd: { default: 0.4, '720p': 0.4, '1080p': 0.4, '4k': 0.6, '4K': 0.6 }
@@ -330,6 +338,8 @@ export const estimateRunCost = (entry) => {
   const resolution = entry.response?.metadata?.resolution || entry.request?.body?.video?.resolution || 'default';
   const videoSecondUsd = resolveUnitPrice(pricing.outputVideoSecondUsd, resolution);
   const videoUsd = videoCount * durationSeconds * videoSecondUsd;
+  const generationCount = requestType === 'audio' && Number.isFinite(pricing.requestUsd) ? 1 : 0;
+  const generationUsd = generationCount * (pricing.requestUsd || 0);
   let audioFallbackUsd = 0;
   let audioFallbackTokens = null;
   const notes = [...tokenCost.notes];
@@ -343,7 +353,7 @@ export const estimateRunCost = (entry) => {
     }
   }
 
-  const totalUsd = money(tokenCost.inputUsd + tokenCost.outputUsd + imageUsd + videoUsd + audioFallbackUsd);
+  const totalUsd = money(tokenCost.inputUsd + tokenCost.outputUsd + imageUsd + videoUsd + generationUsd + audioFallbackUsd);
 
   return {
     currency: 'USD',
@@ -352,12 +362,14 @@ export const estimateRunCost = (entry) => {
     outputUsd: money(tokenCost.outputUsd + audioFallbackUsd),
     imageUsd: money(imageUsd),
     videoUsd: money(videoUsd),
-    priced: totalUsd > 0 || tokenCost.inputTokens === 0 || imageCount > 0 || videoCount > 0,
+    generationUsd: money(generationUsd),
+    priced: totalUsd > 0 || tokenCost.inputTokens === 0 || imageCount > 0 || videoCount > 0 || generationCount > 0,
     modelPricingId: modelId,
     source: pricing.source,
     rates: {
       inputPer1M: tokenCost.inputRatePer1M ?? pricing.inputPer1M ?? null,
       outputPer1M: tokenCost.outputRatePer1M ?? pricing.outputPer1M ?? pricing.outputAudioPer1M ?? null,
+      requestUsd: pricing.requestUsd ?? null,
       imageUnitUsd: imageUnitUsd || null,
       videoSecondUsd: videoSecondUsd || null
     },
@@ -365,6 +377,7 @@ export const estimateRunCost = (entry) => {
       inputTokens: tokenCost.inputTokens,
       outputTokens: tokenCost.outputTokens,
       audioFallbackTokens,
+      generations: generationCount,
       images: imageCount,
       imageSize,
       videos: videoCount,
