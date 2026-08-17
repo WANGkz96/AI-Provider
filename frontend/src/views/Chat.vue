@@ -1385,10 +1385,28 @@ watch(
 );
 
 watch(
-    () => [selectedModel.value, params.eco],
-    ([model, eco], [previousModel, previousEco] = []) => {
+    () => [
+        selectedModel.value,
+        params.eco,
+        params.thinking.enabled,
+        params.thinking.level,
+        params.thinking.includeThoughts
+    ],
+    ([model, eco, thinkingEnabled, thinkingLevel, includeThoughts], [
+        previousModel,
+        previousEco,
+        previousThinkingEnabled,
+        previousThinkingLevel,
+        previousIncludeThoughts
+    ] = []) => {
         if (!isUrlSyncReady.value || !messages.value.length) return;
-        if (model !== previousModel || eco !== previousEco) {
+        if (
+            model !== previousModel
+            || eco !== previousEco
+            || thinkingEnabled !== previousThinkingEnabled
+            || thinkingLevel !== previousThinkingLevel
+            || includeThoughts !== previousIncludeThoughts
+        ) {
             resetProviderStateForRouteChange();
         }
     }
