@@ -84,7 +84,14 @@
     "aliases": [
       "gemini-3-flash",
       "models/gemini-3-flash-preview"
-    ]
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "aiStudio",
+      "rpm": 5,
+      "tpm": 250000,
+      "rpd": 20
+    }
   },
   {
     "id": "gemini-3.1-flash-lite",
@@ -381,11 +388,24 @@
     "id": "gemini-2.5-flash-tts",
     "provider": "google",
     "apiModelId": "gemini-2.5-flash-tts",
+    "aiStudioApiModelId": "gemini-2.5-flash-preview-tts",
+    "vertexApiModelId": "gemini-2.5-flash-tts",
     "type": "audio",
     "audioMode": "gemini-tts",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
     "aliases": [
       "gemini-2.5-flash-preview-tts"
-    ]
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "aiStudio",
+      "rpm": 3,
+      "tpm": 10000,
+      "rpd": 10
+    }
   },
   {
     "id": "gemini-2.5-flash-lite-preview-tts",
@@ -405,8 +425,21 @@
     "id": "gemini-3.1-flash-tts-preview",
     "provider": "google",
     "apiModelId": "gemini-3.1-flash-tts-preview",
+    "aiStudioApiModelId": "gemini-3.1-flash-tts-preview",
+    "vertexApiModelId": "gemini-3.1-flash-tts-preview",
     "type": "audio",
-    "audioMode": "gemini-tts"
+    "audioMode": "gemini-tts",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "aiStudio",
+      "rpm": 3,
+      "tpm": 10000,
+      "rpd": 10
+    }
   },
   {
     "id": "chatterbox-local",
