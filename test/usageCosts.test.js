@@ -11,6 +11,7 @@ const baseEntry = {
     metadata: {
       provider: {
         ecoRouting: {
+          requested: true,
           route: 'aiStudio',
           fallback: false
         }

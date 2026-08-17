@@ -319,7 +319,7 @@ export const estimateRunCost = (entry) => {
     || entry?.providerMetadata?.ecoRouting
     || null;
   const executionProvider = String(entry?.executionProvider || routing?.route || '').toLowerCase();
-  if (executionProvider === 'aistudio' && routing?.fallback !== true) {
+  if (executionProvider === 'aistudio' && routing?.requested === true && routing?.fallback !== true) {
     const usage = entry.usage || entry.response?.usage || null;
     const inputTokens = Number(usage?.inputTokens || 0);
     const outputTokens = Number(usage?.outputTokens || 0);
