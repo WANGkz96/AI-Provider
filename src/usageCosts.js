@@ -314,6 +314,48 @@ export const estimateRunCost = (entry) => {
     return null;
   }
 
+  const routing = entry?.response?.metadata?.provider?.ecoRouting
+    || entry?.response?.metadata?.ecoRouting
+    || entry?.providerMetadata?.ecoRouting
+    || null;
+  const executionProvider = String(entry?.executionProvider || routing?.route || '').toLowerCase();
+  if (executionProvider === 'aistudio' && routing?.fallback !== true) {
+    const usage = entry.usage || entry.response?.usage || null;
+    const inputTokens = Number(usage?.inputTokens || 0);
+    const outputTokens = Number(usage?.outputTokens || 0);
+    return {
+      currency: 'USD',
+      totalUsd: 0,
+      inputUsd: 0,
+      outputUsd: 0,
+      imageUsd: 0,
+      videoUsd: 0,
+      generationUsd: 0,
+      priced: true,
+      modelPricingId: normalizeModelId(entry.apiModelId || entry.model),
+      source: 'Google AI Studio Free Tier',
+      rates: {
+        inputPer1M: 0,
+        outputPer1M: 0,
+        requestUsd: 0,
+        imageUnitUsd: 0,
+        videoSecondUsd: 0
+      },
+      units: {
+        inputTokens,
+        outputTokens,
+        audioFallbackTokens: null,
+        generations: 0,
+        images: 0,
+        imageSize: null,
+        videos: 0,
+        videoDurationSeconds: null,
+        videoResolution: null
+      },
+      notes: ['Successful eco request was served by Google AI Studio Free Tier']
+    };
+  }
+
   const modelId = normalizeModelId(entry.apiModelId || entry.model || entry.response?.metadata?.model);
   const pricing = GOOGLE_PRICING[modelId];
   if (!pricing) {

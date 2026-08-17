@@ -82,6 +82,26 @@ and `models/gemini-3.1-flash-lite-preview` resolve to `gemini-3.1-flash-lite`;
 | `image` | object | No | **(New)** Параметры генерации изображений. |
 | `video` | object | No | **(New)** Параметры генерации видео. |
 
+#### Eco Routing
+
+Eco routing is enabled only when the server has `ECO_ENABLED=true`, global Google mode is
+Vertex, and `GOOGLE_AI_STUDIO_API_KEY` is configured. Add the optional request field
+`"eco": true` to try AI Studio Free Tier first. Requests for non-Google providers ignore it.
+
+The router checks AI Studio model availability, reserves local RPM/RPD/TPM quota, waits for a
+short RPM window when possible, and otherwise uses the normal Vertex request. A successful AI
+Studio response is recorded as free; a Vertex fallback remains billable. The persistent
+`data/eco-quota.json` ledger contains only timestamps, canonical model ids, reservation status
+and token counters, never prompts, keys or response text.
+
+Eco streaming is buffered until the provider decision is complete. The SSE shape remains the
+same, but the first content event is not realtime. Structured output, function calling,
+provider state/chaining and `maxTokens` use the same request fields in both routes.
+
+Text responses expose `metadata.provider.ecoRouting`; media responses expose
+`metadata.ecoRouting`. The metadata includes the actual route, fallback reason, attempts and a
+quota snapshot. Unknown quota profiles use Vertex until monitoring provides a usable profile.
+
 #### Message Object
 ```json
 {

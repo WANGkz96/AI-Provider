@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "test": "node --test",
     "dev:docker": "node --watch --watch-path=src src/index.js",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",

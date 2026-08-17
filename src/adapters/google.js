@@ -9,7 +9,9 @@ import { Storage } from '@google-cloud/storage';
 export class GoogleAdapter extends BaseAdapter {
   constructor(config) {
     super(config);
-    this.apiKey = config.googleApiKey || process.env.GEMINI_API_KEY;
+    this.apiKey = config.googleApiKey !== undefined
+      ? config.googleApiKey
+      : (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
     this.useVertex = !!config.googleUseVertex;
     this.project = config.googleCloudProject;
     this.location = config.googleCloudLocation || 'global';

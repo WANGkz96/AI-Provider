@@ -165,6 +165,8 @@ export const saveConfiguredModels = (models) => {
 export const config = {
   port: process.env.PORT || 3000,
   googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY,
+  googleAiStudioApiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || '',
+  googleAiStudioProject: process.env.GOOGLE_AI_STUDIO_PROJECT || '',
   googleUseVertex: /^(1|true|yes)$/i.test(
     process.env.GOOGLE_GENAI_USE_VERTEXAI || process.env.GOOGLE_USE_VERTEX || ''
   ),
@@ -209,6 +211,12 @@ export const config = {
   runRateLimitWindowMs: parsePositiveIntEnv('RUN_RATE_LIMIT_WINDOW_MS', 60 * 1000),
   runRateLimitMax: parseOptionalPositiveIntEnv('RUN_RATE_LIMIT_MAX', 30),
   runConcurrencyLimit: parseOptionalPositiveIntEnv('RUN_CONCURRENCY_LIMIT', 2),
+  ecoEnabled: parseBooleanEnv('ECO_ENABLED', false),
+  ecoQuotaSyncIntervalMs: parseOptionalPositiveIntEnv('ECO_QUOTA_SYNC_INTERVAL_MS', 60 * 60 * 1000),
+  ecoAvailabilityTtlMs: parseOptionalPositiveIntEnv('ECO_AVAILABILITY_TTL_MS', 60 * 60 * 1000),
+  ecoMaxRpmWaitMs: parseOptionalPositiveIntEnv('ECO_MAX_RPM_WAIT_MS', 60 * 1000),
+  ecoQuotaStatePath: resolveProjectPath(process.env.ECO_QUOTA_STATE_PATH)
+    || path.join(PROJECT_ROOT, 'data/eco-quota.json'),
   defaultGenerationTokens: parseOptionalPositiveIntEnv(
     'DEFAULT_GENERATION_TOKENS',
     parseOptionalPositiveIntEnv('MAX_GENERATION_TOKENS', 0)

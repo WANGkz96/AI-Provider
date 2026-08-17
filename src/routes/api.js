@@ -12,6 +12,9 @@ import { GroqAdapter } from '../adapters/groq.js';
 import { LocalAdapter } from '../adapters/local.js';
 import { ChatterboxAdapter } from '../adapters/chatterbox.js';
 import { VertexOpenAIAdapter } from '../adapters/vertexOpenAI.js';
+import { EcoQuotaLedger, estimateInputTokens } from '../services/ecoQuota.js';
+import { EcoAvailabilityCache, EcoRouter } from '../services/ecoRouting.js';
+import { EcoQuotaMonitor } from '../services/ecoMonitoring.js';
 import {
   createAccessControlMiddleware,
   createConcurrencyLimiter,
@@ -102,6 +105,37 @@ const providers = {
   chatterbox: new ChatterboxAdapter(config)
 };
 
+const aiStudioProvider = config.googleAiStudioApiKey
+  ? new GoogleAdapter({
+      ...config,
+      googleApiKey: config.googleAiStudioApiKey,
+      googleUseVertex: false
+    })
+  : {
+      async generate() {
+        const error = new Error('GOOGLE_AI_STUDIO_API_KEY is not configured');
+        error.code = 'missing_key';
+        throw error;
+      }
+    };
+const ecoQuotaLedger = new EcoQuotaLedger({ statePath: config.ecoQuotaStatePath });
+const ecoAvailabilityCache = new EcoAvailabilityCache({
+  apiKey: config.googleAiStudioApiKey,
+  ttlMs: config.ecoAvailabilityTtlMs
+});
+const ecoRouter = new EcoRouter({
+  config,
+  quotaLedger: ecoQuotaLedger,
+  availabilityCache: ecoAvailabilityCache,
+  aiStudioProvider
+});
+const ecoQuotaMonitor = new EcoQuotaMonitor({
+  config,
+  quotaLedger: ecoQuotaLedger,
+  modelsProvider: getConfiguredModels
+});
+ecoQuotaMonitor.start();
+
 const requireAccessKey = createAccessControlMiddleware(config);
 
 const runRateLimiter = createRateLimiter({
@@ -172,6 +206,20 @@ function isModelAvailableInCurrentMode(model) {
   return model.availableIn.includes(getCurrentGoogleMode());
 }
 
+function isModelAvailableForRequest(model, ecoRequested) {
+  if (isModelAvailableInCurrentMode(model)) {
+    return true;
+  }
+
+  return Boolean(
+    ecoRequested
+    && config.googleUseVertex
+    && model?.provider === 'google'
+    && Array.isArray(model.availableIn)
+    && model.availableIn.includes('aiStudio')
+  );
+}
+
 // --- Validation Schemas ---
 const runSchema = z.object({
   model: z.string(),
@@ -192,6 +240,7 @@ const runSchema = z.object({
   })).max(10).optional(),
   
   stream: z.boolean().optional().default(false),
+  eco: z.boolean().optional().default(false),
   temperature: z.number().min(0).max(2).optional(),
   topP: z.number().min(0).max(1).optional(),
   top_p: z.number().min(0).max(1).optional(),
@@ -391,6 +440,7 @@ function buildRunLogContext({ req, body, targetModel, startedAt }) {
     provider: targetModel?.provider ?? null,
     apiModelId: targetModel?.apiModelId ?? null,
     type: targetModel?.type || 'text',
+    eco: body?.eco === true,
     request: {
       body: body || req.body || null
     }
@@ -659,6 +709,13 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       ...buildRunLogContext({ req, body, targetModel, startedAt }),
       ...entry
     };
+    const providerMetadata = logEntry.response?.metadata?.provider
+      || logEntry.response?.metadata
+      || null;
+    const routing = providerMetadata?.ecoRouting || null;
+    if (!logEntry.executionProvider && routing?.route) {
+      logEntry.executionProvider = routing.route;
+    }
     const cost = estimateRunCost(logEntry);
     const entryWithCost = cost ? { ...logEntry, cost } : logEntry;
 
@@ -732,7 +789,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       return res.status(404).json({ error: `Model '${body.model}' not found in configuration.` });
     }
 
-    if (!isModelAvailableInCurrentMode(targetModel)) {
+    if (!isModelAvailableForRequest(targetModel, body.eco)) {
       const googleMode = getCurrentGoogleMode();
       const message = `Model '${targetModel.id}' is not available in Google ${googleMode} mode.`;
       await writeRunLog({
@@ -753,7 +810,8 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       return res.status(500).json({ error: `Provider '${targetModel.provider}' not initialized.` });
     }
 
-    if (body.stream && usesAdvancedTextContract(body)) {
+    const bufferedEcoRequest = body.eco && targetModel.provider === 'google' && config.googleUseVertex && config.ecoEnabled;
+    if (body.stream && usesAdvancedTextContract(body) && !bufferedEcoRequest) {
       await writeRunLog({
         ok: false,
         statusCode: 400,
@@ -784,6 +842,12 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         video: body.video,
         
         stream: body.stream,
+        eco: body.eco,
+        estimatedInputTokens: estimateInputTokens({
+          prompt: body.prompt,
+          messages: body.messages,
+          media: body.media
+        }),
         options: {
             temperature: body.temperature,
             topP: resolvedTopP,
@@ -809,13 +873,61 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         }
     };
 
+    const isBufferedEcoStream = Boolean(
+      body.stream
+      && body.eco
+      && targetModel.provider === 'google'
+      && config.googleUseVertex
+      && config.ecoEnabled
+    );
+
     if (body.stream && targetModel.type === 'text') { // Only text models stream via SSE
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
 
       try {
-        const stream = await provider.generate({ ...generateParams, stream: true });
+        if (isBufferedEcoStream) {
+          const bufferedResponse = await ecoRouter.generate({
+            targetModel,
+            params: { ...generateParams, stream: false },
+            primaryProvider: provider
+          });
+          const normalized = normalizeTextResponse(bufferedResponse);
+          if (normalized.content) {
+            res.write(`data: ${JSON.stringify({ content: normalized.content })}\n\n`);
+          }
+          if (normalized.providerState?.parts?.length > 0) {
+            res.write(`data: ${JSON.stringify({ provider_state: normalized.providerState })}\n\n`);
+          }
+          res.write('data: [DONE]\n\n');
+          res.end();
+          await writeRunLog({
+            ok: true,
+            statusCode: 200,
+            stream: true,
+            usage: normalized.usage,
+            finishReason: normalized.finishReason,
+            response: {
+              type: 'text',
+              content: normalized.content,
+              output_text: normalized.outputText,
+              provider_state: normalized.providerState,
+              usage: normalized.usage,
+              finishReason: normalized.finishReason,
+              metadata: { provider: normalized.providerMetadata }
+            }
+          });
+          return;
+        }
+
+        const stream = targetModel.provider === 'google'
+          ? await ecoRouter.generate({
+              targetModel,
+              params: { ...generateParams, stream: true },
+              primaryProvider: provider
+            })
+          : await provider.generate({ ...generateParams, stream: true });
         const streamedParts = [];
         const streamedContent = [];
         const streamedThoughts = [];
@@ -894,7 +1006,8 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
               parts: streamedParts
             } : null,
             usage: streamedUsage,
-            finishReason: streamedFinishReason
+            finishReason: streamedFinishReason,
+            metadata: { provider: null }
           }
         });
       } catch (streamError) {
@@ -910,7 +1023,13 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       }
     } else {
       // Standard Response (Text or Audio)
-      const response = await provider.generate({ ...generateParams, stream: false });
+      const response = targetModel.provider === 'google'
+        ? await ecoRouter.generate({
+            targetModel,
+            params: { ...generateParams, stream: false },
+            primaryProvider: provider
+          })
+        : await provider.generate({ ...generateParams, stream: false });
       
       if (targetModel.type === 'audio') {
           if (response.type === 'audio' && (response.audioUrl || response.data)) {
