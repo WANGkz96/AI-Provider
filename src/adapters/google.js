@@ -33,6 +33,7 @@ export class GoogleAdapter extends BaseAdapter {
             location: this.location
           }
         : {
+            vertexai: false,
             apiKey: this.apiKey
           }),
       maxRetries: this.maxRetries,
