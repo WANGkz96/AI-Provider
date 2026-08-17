@@ -25,6 +25,19 @@
       </div>
 
       <template v-if="usage">
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-4">
+            <div class="text-xs uppercase tracking-wide text-emerald-300/70">Actual Vertex AI spend</div>
+            <div class="mt-2 text-2xl font-semibold text-emerald-100">{{ money(usage.summary?.actualVertexUsd) }}</div>
+            <div class="mt-1 text-xs text-emerald-300/60">{{ usage.summary?.vertexRequestCount || 0 }} Vertex requests</div>
+          </div>
+          <div class="rounded-lg border border-cyan-800/60 bg-cyan-950/20 p-4">
+            <div class="text-xs uppercase tracking-wide text-cyan-300/70">Saved on AI Studio Free Tier</div>
+            <div class="mt-2 text-2xl font-semibold text-cyan-100">{{ money(usage.summary?.ecoSavedUsd) }}</div>
+            <div class="mt-1 text-xs text-cyan-300/60">{{ usage.summary?.ecoFreeRequestCount || 0 }} free eco requests</div>
+          </div>
+        </section>
+
         <section class="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div class="rounded-lg border border-blue-800/60 bg-blue-950/20 p-4">
             <div class="text-xs uppercase tracking-wide text-blue-300/70">Estimated month</div>

@@ -136,6 +136,17 @@ export class EcoAvailabilityCache {
 
     return { ok: true, model };
   }
+
+  getStatus() {
+    return {
+      configured: Boolean(this.apiKey),
+      cached: Boolean(this.cache),
+      expiresAt: this.cache?.expiresAt || null,
+      ok: this.cache?.value?.ok ?? null,
+      reason: this.cache?.value?.reason || null,
+      modelCount: this.cache?.value?.models?.length || 0
+    };
+  }
 }
 
 const getModelProfile = (targetModel) => targetModel?.eco || null;

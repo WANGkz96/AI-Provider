@@ -12,7 +12,12 @@ import { GroqAdapter } from '../adapters/groq.js';
 import { LocalAdapter } from '../adapters/local.js';
 import { ChatterboxAdapter } from '../adapters/chatterbox.js';
 import { VertexOpenAIAdapter } from '../adapters/vertexOpenAI.js';
-import { EcoQuotaLedger, estimateInputTokens } from '../services/ecoQuota.js';
+import {
+  EcoQuotaLedger,
+  estimateInputTokens,
+  getNextPacificMidnight,
+  getPacificDate
+} from '../services/ecoQuota.js';
 import { EcoAvailabilityCache, EcoRouter } from '../services/ecoRouting.js';
 import { EcoQuotaMonitor } from '../services/ecoMonitoring.js';
 import {
@@ -563,6 +568,79 @@ router.get('/usage-costs', requireAccessKey, async (req, res) => {
   res.json(summary);
 });
 
+router.get('/eco/status', requireAccessKey, async (req, res) => {
+  await ecoQuotaLedger.ready;
+  const now = Date.now();
+  const models = getConfiguredModels();
+  const googleEcoModels = models.filter((model) => (
+    model?.provider === 'google' && model?.eco?.enabled !== false
+  ));
+  const availability = await ecoAvailabilityCache.listModels();
+  const availableIds = new Set((availability.models || []).map((model) => (
+    String(model.name || model.baseModelId || '').replace(/^models\//, '')
+  )));
+  const nextPacificResetAt = getNextPacificMidnight(now);
+  const quotaState = ecoQuotaLedger.getState();
+
+  const remaining = (limit, used) => (
+    Number.isFinite(Number(limit)) && Number(limit) > 0
+      ? Math.max(0, Number(limit) - Number(used || 0))
+      : null
+  );
+
+  res.json({
+    enabled: Boolean(config.ecoEnabled),
+    active: Boolean(config.ecoEnabled && config.googleUseVertex && config.googleAiStudioApiKey),
+    googleMode: getCurrentGoogleMode(),
+    aiStudioConfigured: Boolean(config.googleAiStudioApiKey),
+    availability: {
+      ...ecoAvailabilityCache.getStatus(),
+      ok: availability.ok,
+      reason: availability.reason || null,
+      modelCount: availability.models?.length || 0
+    },
+    monitoring: ecoQuotaMonitor.getStatus(),
+    timezone: 'America/Los_Angeles',
+    pacificDate: getPacificDate(now),
+    nextPacificResetAt: new Date(nextPacificResetAt).toISOString(),
+    secondsUntilPacificReset: Math.max(0, Math.ceil((nextPacificResetAt - now) / 1000)),
+    ledger: {
+      path: config.ecoQuotaStatePath,
+      updatedAt: quotaState.updatedAt || null,
+      reservationCount: quotaState.reservations?.length || 0
+    },
+    models: googleEcoModels.map((model) => {
+      const aiStudioModelId = String(
+        model.aiStudioApiModelId || model.apiModelId || model.id
+      ).replace(/^models\//, '');
+      const quota = ecoQuotaLedger.snapshot(aiStudioModelId, model.eco);
+      const timing = ecoQuotaLedger.getModelTiming(aiStudioModelId);
+      const available = availability.ok ? availableIds.has(aiStudioModelId) : null;
+
+      return {
+        id: model.id,
+        aliases: model.aliases || [],
+        aiStudioModelId,
+        availableIn: model.availableIn || [],
+        aiStudioAvailable: available,
+        profile: model.eco,
+        quota,
+        remaining: {
+          rpm: remaining(quota.limits.rpm, quota.usage.rpm),
+          rpd: remaining(quota.limits.rpd, quota.usage.rpd),
+          tpm: remaining(quota.limits.tpm, quota.usage.tpm)
+        },
+        nextRpmResetAt: timing.nextRpmResetAt
+          ? new Date(timing.nextRpmResetAt).toISOString()
+          : null,
+        secondsUntilRpmReset: timing.nextRpmResetAt
+          ? Math.max(0, Math.ceil((timing.nextRpmResetAt - now) / 1000))
+          : null
+      };
+    })
+  });
+});
+
 router.get('/billing/summary', requireAccessKey, async (req, res) => {
   try {
     const summary = await getGcloudBillingSummary(config);
@@ -715,6 +793,9 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     const routing = providerMetadata?.ecoRouting || null;
     if (!logEntry.executionProvider && routing?.route) {
       logEntry.executionProvider = routing.route;
+    }
+    if (!logEntry.executionProvider && logEntry.provider === 'google') {
+      logEntry.executionProvider = config.googleUseVertex ? 'vertex' : 'aiStudio';
     }
     const cost = estimateRunCost(logEntry);
     const entryWithCost = cost ? { ...logEntry, cost } : logEntry;

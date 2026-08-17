@@ -102,6 +102,14 @@ Text responses expose `metadata.provider.ecoRouting`; media responses expose
 `metadata.ecoRouting`. The metadata includes the actual route, fallback reason, attempts and a
 quota snapshot. Unknown quota profiles use Vertex until monitoring provides a usable profile.
 
+`GET /eco/status` returns the local ledger state, AI Studio availability, per-model RPM/RPD/TPM
+usage and remaining counters, the next RPM reset, the next Pacific daily reset, and Monitoring
+status. It requires the same access key as the other protected endpoints.
+
+`GET /usage-costs` exposes `summary.actualVertexUsd` for measured Vertex spend,
+`summary.ecoSavedUsd` for the Vertex-equivalent value of successful Free Tier requests,
+`summary.ecoFreeRequestCount`, `summary.vertexRequestCount` and `summary.ecoFallbackCount`.
+
 #### Message Object
 ```json
 {

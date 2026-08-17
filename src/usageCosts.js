@@ -323,9 +323,16 @@ export const estimateRunCost = (entry) => {
     const usage = entry.usage || entry.response?.usage || null;
     const inputTokens = Number(usage?.inputTokens || 0);
     const outputTokens = Number(usage?.outputTokens || 0);
+    const vertexEquivalent = estimateRunCost({
+      ...entry,
+      executionProvider: 'vertex'
+    });
+    const avoidedUsd = Number(vertexEquivalent?.totalUsd) || 0;
     return {
       currency: 'USD',
       totalUsd: 0,
+      avoidedUsd,
+      vertexEquivalentUsd: avoidedUsd,
       inputUsd: 0,
       outputUsd: 0,
       imageUsd: 0,
@@ -639,6 +646,11 @@ const emptySummary = (periodKey, period = {}) => ({
   pricedRequestCount: 0,
   unpricedRequestCount: 0,
   totalUsd: 0,
+  actualVertexUsd: 0,
+  ecoSavedUsd: 0,
+  ecoFreeRequestCount: 0,
+  vertexRequestCount: 0,
+  ecoFallbackCount: 0,
   byProvider: {},
   byModel: {},
   byType: {},
@@ -679,6 +691,17 @@ const trimTopRequests = (month) => {
 
 const applyUsageEntryToSummary = (summary, entry, dateKey) => {
   const costUsd = entry.cost.totalUsd || 0;
+  const executionProvider = String(entry.executionProvider || '').toLowerCase();
+  const avoidedUsd = Number(entry.cost.avoidedUsd) || 0;
+  if (!Number.isFinite(Number(summary.actualVertexUsd))) {
+    summary.actualVertexUsd = Number(summary.totalUsd) || 0;
+  }
+  if (!Number.isFinite(Number(summary.ecoSavedUsd))) summary.ecoSavedUsd = 0;
+  if (!Number.isFinite(Number(summary.ecoFreeRequestCount))) summary.ecoFreeRequestCount = 0;
+  if (!Number.isFinite(Number(summary.vertexRequestCount))) {
+    summary.vertexRequestCount = Number(summary.requestCount) || 0;
+  }
+  if (!Number.isFinite(Number(summary.ecoFallbackCount))) summary.ecoFallbackCount = 0;
   summary.requestCount += 1;
   if (entry.cost.priced) {
     summary.pricedRequestCount += 1;
@@ -686,6 +709,17 @@ const applyUsageEntryToSummary = (summary, entry, dateKey) => {
     summary.unpricedRequestCount += 1;
   }
   summary.totalUsd = money(summary.totalUsd + costUsd);
+  if (executionProvider === 'vertex') {
+    summary.actualVertexUsd = money(summary.actualVertexUsd + costUsd);
+    summary.vertexRequestCount += 1;
+    if (entry.response?.metadata?.provider?.ecoRouting?.fallback === true) {
+      summary.ecoFallbackCount += 1;
+    }
+  }
+  if (executionProvider === 'aistudio' && avoidedUsd > 0) {
+    summary.ecoSavedUsd = money(summary.ecoSavedUsd + avoidedUsd);
+    summary.ecoFreeRequestCount += 1;
+  }
   addToBucket(summary.byProvider, entry.provider, costUsd);
   addToBucket(summary.byModel, entry.model, costUsd);
   addToBucket(summary.byType, entry.type, costUsd);
@@ -718,6 +752,11 @@ const mergeFullSummary = (target, source) => {
   target.pricedRequestCount += source.pricedRequestCount || 0;
   target.unpricedRequestCount += source.unpricedRequestCount || 0;
   target.totalUsd = money(target.totalUsd + (source.totalUsd || 0));
+  target.actualVertexUsd = money(target.actualVertexUsd + (source.actualVertexUsd ?? source.totalUsd ?? 0));
+  target.ecoSavedUsd = money(target.ecoSavedUsd + (source.ecoSavedUsd || 0));
+  target.ecoFreeRequestCount += source.ecoFreeRequestCount || 0;
+  target.vertexRequestCount += source.vertexRequestCount ?? source.requestCount ?? 0;
+  target.ecoFallbackCount += source.ecoFallbackCount || 0;
   mergeBucket(target.byProvider, source.byProvider);
   mergeBucket(target.byModel, source.byModel);
   mergeBucket(target.byType, source.byType);
@@ -777,6 +816,8 @@ const buildCostJournalEvent = ({ entry, monthKey, dateKey, cycle }) => ({
   ok: Boolean(entry.ok),
   statusCode: entry.statusCode ?? null,
   provider: entry.provider || 'unknown',
+  executionProvider: entry.executionProvider || null,
+  ecoRequested: entry.eco === true,
   model: entry.model || 'unknown',
   apiModelId: entry.apiModelId || null,
   type: entry.type || 'unknown',
@@ -860,6 +901,15 @@ export const getUsageCostSummary = async ({ month, period } = {}) => {
   const selected = useReportCycle
     ? (ledger.cycles?.[currentCycle.key] || buildCycleFromMonths(ledger, currentCycle))
     : (ledger.months?.[selectedMonth] || emptyMonth(selectedMonth));
+  const summary = {
+    ...emptySummary(selectedPeriod.key, selectedPeriod),
+    ...selected,
+    actualVertexUsd: selected.actualVertexUsd ?? selected.totalUsd ?? 0,
+    ecoSavedUsd: selected.ecoSavedUsd ?? 0,
+    ecoFreeRequestCount: selected.ecoFreeRequestCount ?? 0,
+    vertexRequestCount: selected.vertexRequestCount ?? selected.requestCount ?? 0,
+    ecoFallbackCount: selected.ecoFallbackCount ?? 0
+  };
 
   return {
     currency: 'USD',
@@ -876,7 +926,7 @@ export const getUsageCostSummary = async ({ month, period } = {}) => {
     months: Object.keys(ledger.months || {}).sort().reverse(),
     cycles: Object.keys(ledger.cycles || {}).sort().reverse(),
     journal: ledger.journal || null,
-    summary: selected,
+    summary,
     pricingVersion: 'google-public-pricing-2026-07-25',
     pricingModels: Object.keys(GOOGLE_PRICING).sort()
   };

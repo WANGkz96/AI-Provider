@@ -42,6 +42,13 @@
         >
             Billing
         </router-link>
+        <router-link
+            to="/eco"
+            class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+            :class="$route.path === '/eco' ? 'text-blue-400 bg-blue-900/20' : 'text-slate-400 hover:text-slate-200'"
+        >
+            Eco
+        </router-link>
       </nav>
     </div>
     

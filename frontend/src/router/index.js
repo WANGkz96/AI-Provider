@@ -3,6 +3,7 @@ import Chat from '../views/Chat.vue'
 import Config from '../views/Config.vue'
 import RequestLogs from '../views/RequestLogs.vue'
 import Billing from '../views/Billing.vue'
+import Eco from '../views/Eco.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -26,6 +27,11 @@ const router = createRouter({
         path: '/billing',
         name: 'billing',
         component: Billing
+    },
+    {
+        path: '/eco',
+        name: 'eco',
+        component: Eco
     }
   ]
 })

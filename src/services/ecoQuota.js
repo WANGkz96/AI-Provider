@@ -26,6 +26,27 @@ export const getPacificDate = (timestamp = Date.now()) => {
   return `${values.year}-${values.month}-${values.day}`;
 };
 
+export const getNextPacificMidnight = (timestamp = Date.now()) => {
+  const currentDate = getPacificDate(timestamp);
+  let low = timestamp;
+  let high = timestamp + 36 * 60 * 60 * 1000;
+
+  while (getPacificDate(high) === currentDate) {
+    high += 12 * 60 * 60 * 1000;
+  }
+
+  for (let index = 0; index < 48; index += 1) {
+    const midpoint = Math.floor((low + high) / 2);
+    if (getPacificDate(midpoint) === currentDate) {
+      low = midpoint;
+    } else {
+      high = midpoint;
+    }
+  }
+
+  return high;
+};
+
 const normalizeProfile = (profile = {}) => ({
   enabled: profile.enabled !== false,
   quotaSource: profile.quotaSource || 'unknown',
@@ -240,6 +261,21 @@ export class EcoQuotaLedger {
 
   getState() {
     return JSON.parse(JSON.stringify(this.state));
+  }
+
+  getModelTiming(modelId) {
+    const now = this.now();
+    const key = String(modelId || '').replace(/^models\//, '');
+    const oldestRecentReservation = this.state.reservations
+      .filter((item) => item.modelId === key && now - Number(item.timestamp) < MINUTE_MS)
+      .sort((a, b) => Number(a.timestamp) - Number(b.timestamp))[0];
+
+    return {
+      nextRpmResetAt: oldestRecentReservation
+        ? Number(oldestRecentReservation.timestamp) + MINUTE_MS + 25
+        : null,
+      windowMs: MINUTE_MS
+    };
   }
 }
 

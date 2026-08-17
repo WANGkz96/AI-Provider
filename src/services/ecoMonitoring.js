@@ -43,6 +43,17 @@ export class EcoQuotaMonitor {
     this.timer = null;
   }
 
+  getStatus() {
+    return {
+      configured: Boolean(this.config?.googleAiStudioApiKey),
+      running: this.running,
+      scheduled: Boolean(this.timer),
+      intervalMs: Number(this.config?.ecoQuotaSyncIntervalMs || 0),
+      disabledReason: this.disabledReason,
+      enabled: Boolean(this.config?.ecoEnabled && this.config?.googleUseVertex)
+    };
+  }
+
   async getAccessToken() {
     const auth = this.authFactory();
     const client = await auth.getClient();
