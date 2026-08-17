@@ -337,7 +337,28 @@ export class GoogleAdapter extends BaseAdapter {
       ? message.provider_state.parts
       : (Array.isArray(message?.parts) ? message.parts : []);
 
-    return this.cloneParts(parts);
+    return this.sanitizeIncomingParts(this.cloneParts(parts));
+  }
+
+  sanitizeIncomingParts(parts) {
+    return (parts || []).flatMap((part) => {
+      if (!part || typeof part !== 'object') {
+        return [];
+      }
+
+      // Gemini 3 signatures are mandatory on function calls, but signatures
+      // attached to ordinary text parts are optional and can become invalid
+      // when a chat switches model or provider route.
+      if (part.functionCall) {
+        return [part];
+      }
+
+      const sanitized = { ...part };
+      delete sanitized.thoughtSignature;
+      delete sanitized.thought_signature;
+
+      return Object.keys(sanitized).length > 0 ? [sanitized] : [];
+    });
   }
 
   cloneParts(parts) {

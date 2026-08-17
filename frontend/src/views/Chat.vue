@@ -1385,6 +1385,16 @@ watch(
 );
 
 watch(
+    () => [selectedModel.value, params.eco],
+    ([model, eco], [previousModel, previousEco] = []) => {
+        if (!isUrlSyncReady.value || !messages.value.length) return;
+        if (model !== previousModel || eco !== previousEco) {
+            resetProviderStateForRouteChange();
+        }
+    }
+);
+
+watch(
     () => [selectedModel.value, currentModelType.value, params.thinking.enabled],
     () => {
         const levels = thinkingLevels.value;
@@ -1673,6 +1683,19 @@ const buildAssistantMessageFromRunResponse = (data) => {
             : (Array.isArray(message.toolCalls) ? message.toolCalls : []),
         isError: false
     };
+};
+
+const resetProviderStateForRouteChange = () => {
+    messages.value = messages.value
+        .filter((message) => message.role !== 'tool')
+        .map((message) => message.role === 'assistant'
+            ? {
+                ...message,
+                parts: [],
+                provider_state: null,
+                tool_calls: []
+            }
+            : message);
 };
 
 const normalizeReturnedImages = (images, fallbackMimeType = 'image/png') => {

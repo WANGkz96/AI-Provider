@@ -86,3 +86,57 @@ test('Gemma 4 maps legacy thinking budgets to its binary API levels', () => {
     { thinkingLevel: 'MINIMAL' }
   );
 });
+
+test('drops stale text thought signatures but preserves function-call signatures', async () => {
+  const adapter = new GoogleAdapter({
+    googleApiKey: 'test-key',
+    googleUseVertex: false
+  });
+
+  const textHistory = await adapter.buildGeminiRequestContents({
+    messages: [
+      { role: 'user', content: 'First question' },
+      {
+        role: 'assistant',
+        provider_state: {
+          role: 'model',
+          parts: [
+            { text: 'Old thought summary', thought: true, thoughtSignature: 'stale' },
+            { thoughtSignature: 'orphan' },
+            { text: 'Old answer', thoughtSignature: 'stale-answer' }
+          ]
+        }
+      },
+      { role: 'user', content: 'Continue' }
+    ]
+  });
+
+  assert.deepEqual(textHistory.contents[1].parts, [
+    { text: 'Old thought summary', thought: true },
+    { text: 'Old answer' }
+  ]);
+
+  const toolHistory = await adapter.buildGeminiRequestContents({
+    messages: [
+      { role: 'user', content: 'Call a tool.' },
+      {
+        role: 'assistant',
+        provider_state: {
+          role: 'model',
+          parts: [{
+            functionCall: { name: 'get_weather', args: { city: 'Paris' } },
+            thoughtSignature: 'required-signature'
+          }]
+        }
+      },
+      {
+        role: 'tool',
+        name: 'get_weather',
+        tool_call_id: 'call-1',
+        content: '{"temperature":20}'
+      }
+    ]
+  });
+
+  assert.equal(toolHistory.contents[1].parts[0].thoughtSignature, 'required-signature');
+});
