@@ -28,10 +28,7 @@
                   <div v-if="supportsThinkingLevel">
                     <label class="text-xs text-slate-400 font-medium block mb-1.5">Thinking Level</label>
                     <select v-model="params.thinking.level" class="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs focus:border-blue-500 outline-none transition-colors">
-                      <option value="MINIMAL">MINIMAL</option>
-                      <option value="LOW">LOW</option>
-                      <option value="MEDIUM">MEDIUM</option>
-                      <option value="HIGH">HIGH</option>
+                      <option v-for="level in thinkingLevels" :key="level" :value="level">{{ level }}</option>
                     </select>
                   </div>
                   <div v-else>
@@ -890,6 +887,7 @@ const VIDEO_RESOLUTIONS = ['720p', '1080p'];
 const AUDIO_LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh'];
 const GEMINI_TTS_MODES = ['single', 'multi'];
 const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'];
+const GEMMA4_THINKING_LEVELS = ['MINIMAL', 'HIGH'];
 const MAX_MEDIA_ATTACHMENTS = 10;
 const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
 
@@ -978,8 +976,23 @@ const supportsThinkingLevel = computed(() => {
     }
 
     const modelId = String(currentModel.value?.apiModelId || currentModel.value?.id || '').toLowerCase();
-    return /^gemini-3([.-]|$)/.test(modelId);
+    return /^gemini-3([.-]|$)/.test(modelId) || /^gemma-4([.-]|$)/.test(modelId);
 });
+
+const isGemma4Model = (model) => {
+    const modelId = String(model?.apiModelId || model?.id || '').toLowerCase();
+    return /^gemma-4([.-]|$)/.test(modelId);
+};
+
+const getThinkingLevelsForModel = (model) => (
+    isGemma4Model(model) ? GEMMA4_THINKING_LEVELS : THINKING_LEVELS
+);
+
+const getDefaultThinkingLevelForModel = (model) => (
+    isGemma4Model(model) ? 'HIGH' : DEFAULT_TEXT_PARAMS.thinkingLevel
+);
+
+const thinkingLevels = computed(() => getThinkingLevelsForModel(currentModel.value));
 
 // Voices are now derived from the selected model's additions
 const voices = computed(() => {
@@ -1119,7 +1132,10 @@ const applyQueryToState = (query) => {
         params.stream = parseBooleanQuery(toSingleQueryValue(query.stream)) ?? DEFAULT_TEXT_PARAMS.stream;
         params.eco = parseBooleanQuery(toSingleQueryValue(query.eco)) ?? DEFAULT_TEXT_PARAMS.eco;
         params.thinking.enabled = parseBooleanQuery(toSingleQueryValue(query.thinking)) ?? DEFAULT_TEXT_PARAMS.thinkingEnabled;
-        params.thinking.level = parseEnumQuery(toSingleQueryValue(query.thinkingLevel), THINKING_LEVELS) ?? DEFAULT_TEXT_PARAMS.thinkingLevel;
+        params.thinking.level = parseEnumQuery(
+            toSingleQueryValue(query.thinkingLevel),
+            getThinkingLevelsForModel(safeModel)
+        ) ?? getDefaultThinkingLevelForModel(safeModel);
         params.thinking.budget = parseIntegerQuery(toSingleQueryValue(query.thinkingBudget), -1) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
         params.thinking.includeThoughts = parseBooleanQuery(toSingleQueryValue(query.includeThoughts)) ?? DEFAULT_TEXT_PARAMS.includeThoughts;
 
@@ -1364,6 +1380,16 @@ watch(
         }
         if (!availableVoiceNames.includes(audioParams.speaker2VoiceName)) {
             audioParams.speaker2VoiceName = availableVoiceNames[1] || fallbackVoice;
+        }
+    }
+);
+
+watch(
+    () => [selectedModel.value, currentModelType.value, params.thinking.enabled],
+    () => {
+        const levels = thinkingLevels.value;
+        if (supportsThinkingLevel.value && !levels.includes(params.thinking.level)) {
+            params.thinking.level = getDefaultThinkingLevelForModel(currentModel.value);
         }
     }
 );

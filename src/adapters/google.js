@@ -99,6 +99,7 @@ export class GoogleAdapter extends BaseAdapter {
     console.log(`[GoogleAdapter:GeminiMultimodal] Requesting model: ${model}`);
 
     const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media });
+    const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
     const config = {
       temperature: options?.temperature,
       topP: options?.topP,
@@ -109,7 +110,8 @@ export class GoogleAdapter extends BaseAdapter {
       responseJsonSchema: options?.responseJsonSchema,
       tools: this.mapOpenAIToolsToGemini(options?.tools),
       toolConfig: this.mapToolChoiceToGemini(options?.toolChoice),
-      systemInstruction
+      systemInstruction,
+      thinkingConfig
     };
 
     const request = {
@@ -398,6 +400,11 @@ export class GoogleAdapter extends BaseAdapter {
     return /^gemini-3([.-]|$)/.test(normalizedModel);
   }
 
+  isGemma4ThinkingModel(model) {
+    const normalizedModel = this.normalizeText(model).trim().toLowerCase();
+    return /^gemma-4([.-]|$)/.test(normalizedModel);
+  }
+
   isGeminiModel(model) {
     const normalizedModel = this.normalizeText(model).trim().toLowerCase();
     return normalizedModel.startsWith('gemini-');
@@ -408,6 +415,24 @@ export class GoogleAdapter extends BaseAdapter {
     if (['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'].includes(normalizedLevel)) {
       return normalizedLevel;
     }
+    return undefined;
+  }
+
+  normalizeGemma4ThinkingLevel(level, budget) {
+    const explicitLevel = this.normalizeThinkingLevel(level);
+    if (explicitLevel === 'MINIMAL' || explicitLevel === 'HIGH') {
+      return explicitLevel;
+    }
+
+    // Gemma 4 exposes a binary thinking switch in Gemini API. Preserve
+    // legacy numeric callers by mapping positive budgets to enabled thinking.
+    if (explicitLevel === 'LOW' || explicitLevel === 'MEDIUM') {
+      return 'HIGH';
+    }
+
+    const normalizedBudget = this.normalizeThinkingBudget(budget);
+    if (normalizedBudget === 0) return 'MINIMAL';
+    if (normalizedBudget > 0) return 'HIGH';
     return undefined;
   }
 
@@ -451,15 +476,27 @@ export class GoogleAdapter extends BaseAdapter {
       return undefined;
     }
 
-    if (!this.isGeminiModel(model)) {
+    const isGeminiModel = this.isGeminiModel(model);
+    const isGemma4Model = this.isGemma4ThinkingModel(model);
+    if (!isGeminiModel && !isGemma4Model) {
       return undefined;
     }
 
     const includeThoughts = thinking.includeThoughts === true ? true : undefined;
-    const explicitLevel = this.normalizeThinkingLevel(thinking.level);
 
     if (this.isGemini3ThinkingModel(model)) {
+      const explicitLevel = this.normalizeThinkingLevel(thinking.level);
       const thinkingLevel = explicitLevel ?? this.mapGemini3ThinkingLevelFromBudget(thinking.budget);
+      const config = this.removeUndefined({
+        includeThoughts,
+        thinkingLevel
+      });
+
+      return Object.keys(config).length > 0 ? config : undefined;
+    }
+
+    if (isGemma4Model) {
+      const thinkingLevel = this.normalizeGemma4ThinkingLevel(thinking.level, thinking.budget);
       const config = this.removeUndefined({
         includeThoughts,
         thinkingLevel

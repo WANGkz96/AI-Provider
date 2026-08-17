@@ -211,6 +211,21 @@ function isModelAvailableInCurrentMode(model) {
   return model.availableIn.includes(getCurrentGoogleMode());
 }
 
+function isModelAvailableInEcoListing(model) {
+  return Boolean(
+    config.ecoEnabled
+    && config.googleUseVertex
+    && model?.provider === 'google'
+    && model?.eco?.enabled === true
+    && Array.isArray(model.availableIn)
+    && model.availableIn.includes('aiStudio')
+  );
+}
+
+function isModelAvailableForListing(model) {
+  return isModelAvailableInCurrentMode(model) || isModelAvailableInEcoListing(model);
+}
+
 function isModelAvailableForRequest(model, ecoRequested) {
   if (isModelAvailableInCurrentMode(model)) {
     return true;
@@ -661,7 +676,7 @@ router.get('/available-models', requireAccessKey, async (req, res) => {
   const validModels = [];
 
   for (const m of models) {
-    if (!isModelAvailableInCurrentMode(m)) {
+    if (!isModelAvailableForListing(m)) {
       continue;
     }
 
