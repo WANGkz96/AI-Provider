@@ -21,6 +21,7 @@ export class EcoQuotaMonitor {
     this.modelsProvider = modelsProvider || (() => []);
     this.timer = null;
     this.running = false;
+    this.disabledReason = null;
   }
 
   start() {
@@ -103,7 +104,9 @@ export class EcoQuotaMonitor {
   }
 
   async sync() {
-    if (this.running || !this.config?.googleAiStudioApiKey || !this.quotaLedger) return { skipped: true };
+    if (this.running || this.disabledReason || !this.config?.googleAiStudioApiKey || !this.quotaLedger) {
+      return { skipped: true, reason: this.disabledReason || 'not_configured' };
+    }
     this.running = true;
     try {
       const accessToken = await this.getAccessToken();
@@ -130,6 +133,19 @@ export class EcoQuotaMonitor {
       }
 
       return { ok: true, project, models: models.length };
+    } catch (error) {
+      const message = String(error?.message || error);
+      const status = Number(error?.status || error?.response?.status || 0);
+      if (
+        status === 401
+        || status === 403
+        || /quota project|permission denied|insufficient|unauthorized|forbidden/i.test(message)
+      ) {
+        this.disabledReason = message;
+        console.warn(`[EcoQuota] Monitoring disabled: ${message}`);
+        return { skipped: true, reason: 'monitoring_disabled' };
+      }
+      throw error;
     } finally {
       this.running = false;
     }
