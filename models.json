@@ -118,7 +118,14 @@
     "aliases": [
       "models/gemini-3.5-flash",
       "gemini-3.5-flash-05-2026"
-    ]
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "aiStudio",
+      "rpm": 5,
+      "tpm": 250000,
+      "rpd": 20
+    }
   },
   {
     "id": "gemini-3.7-flash",
@@ -136,7 +143,14 @@
       "models/gemini-3.7-flash",
       "gemini-3.7-flash-preview",
       "models/gemini-3.7-flash-preview"
-    ]
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "aiStudio",
+      "rpm": 5,
+      "tpm": 250000,
+      "rpd": 20
+    }
   },
   {
     "id": "gemini-3.6-flash",
@@ -152,7 +166,14 @@
     ],
     "aliases": [
       "models/gemini-3.6-flash"
-    ]
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "aiStudio",
+      "rpm": 5,
+      "tpm": 250000,
+      "rpd": 20
+    }
   },
   {
     "id": "gemini-3.5-flash-lite",

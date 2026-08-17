@@ -16,3 +16,18 @@ test('Gemma 4 models have the AI Studio Free Tier eco profile', () => {
     });
   }
 });
+
+test('Gemini Flash models use the current AI Studio Free Tier limits', () => {
+  for (const modelId of ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash']) {
+    const model = models.find((entry) => entry.id === modelId);
+
+    assert.ok(model, `${modelId} must stay configured`);
+    assert.deepEqual(model.eco, {
+      enabled: true,
+      quotaSource: 'aiStudio',
+      rpm: 5,
+      tpm: 250000,
+      rpd: 20
+    });
+  }
+});
