@@ -92,6 +92,25 @@
                     <label class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-700 cursor-pointer"></label>
                   </div>
               </div>
+
+              <div class="flex items-center justify-between gap-3 pt-2">
+                 <div class="min-w-0">
+                    <label for="eco-mode" class="text-sm font-medium text-slate-300">Eco Mode</label>
+                    <span class="mt-1 block text-[10px] leading-4 text-slate-500">
+                      {{ supportsEcoRouting ? 'AI Studio Free Tier with Vertex fallback' : 'Available for Google text models' }}
+                    </span>
+                 </div>
+                 <div class="relative inline-block w-10 shrink-0 align-middle select-none transition duration-200 ease-in">
+                    <input
+                      id="eco-mode"
+                      type="checkbox"
+                      v-model="params.eco"
+                      :disabled="!supportsEcoRouting || isGenerating"
+                      class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <label for="eco-mode" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-700 cursor-pointer"></label>
+                 </div>
+              </div>
             </div>
         </template>
 
@@ -799,6 +818,7 @@ const KNOWN_QUERY_KEYS = new Set([
     'topP',
     'maxTokens',
     'stream',
+    'eco',
     'thinking',
     'thinkingLevel',
     'thinkingBudget',
@@ -828,6 +848,7 @@ const DEFAULT_TEXT_PARAMS = Object.freeze({
     topP: 0.95,
     maxTokens: undefined,
     stream: true,
+    eco: false,
     thinkingEnabled: false,
     thinkingLevel: 'LOW',
     thinkingBudget: 4096,
@@ -901,6 +922,7 @@ const params = reactive({
     topP: DEFAULT_TEXT_PARAMS.topP,
     maxTokens: DEFAULT_TEXT_PARAMS.maxTokens,
     stream: DEFAULT_TEXT_PARAMS.stream,
+    eco: DEFAULT_TEXT_PARAMS.eco,
     thinking: {
         enabled: DEFAULT_TEXT_PARAMS.thinkingEnabled,
         level: DEFAULT_TEXT_PARAMS.thinkingLevel,
@@ -943,6 +965,10 @@ const currentModelType = computed(() => {
 });
 
 const supportsTextMedia = computed(() => {
+    return currentModelType.value === 'text' && currentModel.value?.provider === 'google';
+});
+
+const supportsEcoRouting = computed(() => {
     return currentModelType.value === 'text' && currentModel.value?.provider === 'google';
 });
 
@@ -1091,6 +1117,7 @@ const applyQueryToState = (query) => {
         params.topP = parseNumberQuery(toSingleQueryValue(query.topP), 0, 1) ?? DEFAULT_TEXT_PARAMS.topP;
         params.maxTokens = parseIntegerQuery(toSingleQueryValue(query.maxTokens), 1);
         params.stream = parseBooleanQuery(toSingleQueryValue(query.stream)) ?? DEFAULT_TEXT_PARAMS.stream;
+        params.eco = parseBooleanQuery(toSingleQueryValue(query.eco)) ?? DEFAULT_TEXT_PARAMS.eco;
         params.thinking.enabled = parseBooleanQuery(toSingleQueryValue(query.thinking)) ?? DEFAULT_TEXT_PARAMS.thinkingEnabled;
         params.thinking.level = parseEnumQuery(toSingleQueryValue(query.thinkingLevel), THINKING_LEVELS) ?? DEFAULT_TEXT_PARAMS.thinkingLevel;
         params.thinking.budget = parseIntegerQuery(toSingleQueryValue(query.thinkingBudget), -1) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
@@ -1190,6 +1217,7 @@ const buildStateQuery = () => {
         temperature: String(safeTemperature),
         topP: String(safeTopP),
         stream: String(Boolean(params.stream)),
+        eco: String(Boolean(params.eco)),
         thinking: String(Boolean(params.thinking.enabled)),
         includeThoughts: String(Boolean(params.thinking.includeThoughts)),
         imageSize: safeImageSize,
@@ -1282,6 +1310,7 @@ watch(
         params.topP,
         params.maxTokens,
         params.stream,
+        params.eco,
         params.thinking.enabled,
         params.thinking.level,
         params.thinking.budget,
@@ -1729,6 +1758,7 @@ const sendMessage = async () => {
             .filter((message) => !message.isError)
             .map((message) => serializeChatMessageForRequest(message)),
         stream: shouldStream,
+        eco: Boolean(params.eco),
         temperature: params.temperature,
         topP: params.topP,
         maxTokens: params.maxTokens || undefined
