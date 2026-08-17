@@ -24,7 +24,10 @@
     ],
     "eco": {
       "enabled": true,
-      "quotaSource": "monitoring"
+      "quotaSource": "aiStudio",
+      "rpm": 30,
+      "tpm": 16000,
+      "rpd": 14400
     },
     "aliases": [
       "gemma-4",
@@ -46,7 +49,10 @@
     ],
     "eco": {
       "enabled": true,
-      "quotaSource": "monitoring"
+      "quotaSource": "aiStudio",
+      "rpm": 30,
+      "tpm": 16000,
+      "rpd": 14400
     },
     "aliases": [
       "gemma-4-31b",
