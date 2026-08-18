@@ -21,6 +21,7 @@ import {
 import { EcoAvailabilityCache, EcoRouter } from '../services/ecoRouting.js';
 import { EcoQuotaMonitor } from '../services/ecoMonitoring.js';
 import { resolveFallbackModelIds } from '../services/modelFallback.js';
+import { resolveResponseModelId } from '../services/responseModel.js';
 import {
   createAccessControlMiddleware,
   createConcurrencyLimiter,
@@ -480,6 +481,7 @@ function buildResponseLogPayload(payload) {
   if (payload.type === 'text') {
     return {
       type: payload.type,
+      model: payload.model,
       content: payload.content,
       output_text: payload.output_text,
       parsed_output: payload.parsed_output,
@@ -495,6 +497,7 @@ function buildResponseLogPayload(payload) {
   if (payload.type === 'audio') {
     return {
       type: payload.type,
+      model: payload.model,
       audioUrl: payload.audioUrl,
       audio: payload.audio ? {
         mimeType: payload.audio.mimeType,
@@ -508,6 +511,7 @@ function buildResponseLogPayload(payload) {
   if (payload.type === 'image') {
     return {
       type: payload.type,
+      model: payload.model,
       images: (payload.images || []).map((image) => ({
         mimeType: image.mimeType,
         fileName: image.fileName,
@@ -522,6 +526,7 @@ function buildResponseLogPayload(payload) {
   if (payload.type === 'video') {
     return {
       type: payload.type,
+      model: payload.model,
       videos: (payload.videos || []).map((video) => ({
         mimeType: video.mimeType,
         fileName: video.fileName,
@@ -1197,12 +1202,17 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         if (isBufferedGeneration) {
           const bufferedResponse = await executeRequest({ stream: false });
           const normalized = normalizeTextResponse(bufferedResponse);
+          const actualModel = resolveResponseModelId({
+            response: bufferedResponse,
+            fallbackModelId: targetModel.id
+          });
           if (normalized.content) {
             res.write(`data: ${JSON.stringify({ content: normalized.content })}\n\n`);
           }
           if (normalized.providerState?.parts?.length > 0) {
             res.write(`data: ${JSON.stringify({ provider_state: normalized.providerState })}\n\n`);
           }
+          res.write(`data: ${JSON.stringify({ model: actualModel })}\n\n`);
           res.write('data: [DONE]\n\n');
           res.end();
           await writeRunLog({
@@ -1213,6 +1223,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             finishReason: normalized.finishReason,
             response: {
               type: 'text',
+              model: actualModel,
               content: normalized.content,
               output_text: normalized.outputText,
               provider_state: normalized.providerState,
@@ -1286,6 +1297,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
           })}\n\n`);
         }
 
+        res.write(`data: ${JSON.stringify({ model: targetModel.id })}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
         await writeRunLog({
@@ -1296,6 +1308,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
           finishReason: streamedFinishReason,
           response: {
             type: 'text',
+            model: targetModel.id,
             content: streamedContent.join(''),
             thought: streamedThoughts.join(''),
             provider_state: streamedParts.length > 0 ? {
@@ -1324,8 +1337,13 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       
       if (targetModel.type === 'audio') {
           if (response.type === 'audio' && (response.audioUrl || response.data)) {
+              const actualModel = resolveResponseModelId({
+                response,
+                fallbackModelId: targetModel.id
+              });
               const payload = {
                   type: 'audio',
+                  model: actualModel,
                   audioUrl: response.audioUrl || null,
                   audio: response.data ? {
                       data: response.data,
@@ -1357,8 +1375,13 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
           }
       } else if (targetModel.type === 'image') {
           if (response.type === 'image' && Array.isArray(response.images) && response.images.length > 0) {
+              const actualModel = resolveResponseModelId({
+                response,
+                fallbackModelId: targetModel.id
+              });
               const payload = {
                   type: 'image',
+                  model: actualModel,
                   images: response.images,
                   message: response.message || null,
                   provider_state: response.providerState || response.message?.providerState || response.message?.provider_state || null,
@@ -1382,8 +1405,13 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
           }
       } else if (targetModel.type === 'video') {
           if (response.type === 'video' && Array.isArray(response.videos) && response.videos.length > 0) {
+              const actualModel = resolveResponseModelId({
+                response,
+                fallbackModelId: targetModel.id
+              });
               const payload = {
                   type: 'video',
+                  model: actualModel,
                   videos: response.videos,
                   metadata: response.metadata || {}
               };
@@ -1406,6 +1434,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       } else {
           // Text response
           const normalized = normalizeTextResponse(response);
+          const actualModel = resolveResponseModelId({
+            response,
+            fallbackModelId: targetModel.id
+          });
           const expectsJson = resolvedResponseMimeType === 'application/json';
           const strictJson = expectsJson ? (resolvedStrictJson ?? true) : (resolvedStrictJson ?? false);
           const finishReason = normalized.finishReason;
@@ -1423,6 +1455,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
 
             if (!parsedResult.ok && strictJson) {
               const payload = {
+                model: actualModel,
                 error: 'Model returned invalid JSON',
                 details: parsedResult.error,
                 content,
@@ -1460,6 +1493,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
 
           const payload = {
             type: 'text',
+            model: actualModel,
             content,
             message: {
               role: normalized.messageRole,
