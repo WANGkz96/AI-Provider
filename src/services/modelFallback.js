@@ -58,6 +58,10 @@ export const resolveAutoFallbackModelIds = (modelId, options = {}) => {
   const index = order.indexOf(canonical);
   if (index < 0) return [];
 
+  if (normalizedOptions.includeAll) {
+    return order.slice(index + 1);
+  }
+
   return order.slice(index + 1, index + 1 + maxModels);
 };
 
@@ -66,13 +70,15 @@ export const resolveFallbackModelIds = ({
   modelId,
   type = 'text',
   audioMode,
-  maxAutoModels = 2
+  maxAutoModels = 2,
+  includeAllAutoModels = false
 } = {}) => {
   if (useFallback === 'auto') {
     return resolveAutoFallbackModelIds(modelId, {
       type,
       audioMode,
-      maxModels: maxAutoModels
+      maxModels: maxAutoModels,
+      includeAll: includeAllAutoModels
     });
   }
 

@@ -19,6 +19,22 @@ test('auto fallback follows the text priority ladder and stops after two models'
   assert.ok(GEMINI_AUTO_FALLBACK_ORDER.includes('gemini-2.5-flash-lite'));
 });
 
+test('eco auto fallback can expose the rest of the same group for quota-aware skipping', () => {
+  assert.deepEqual(resolveFallbackModelIds({
+    useFallback: 'auto',
+    modelId: 'gemini-3.7-flash',
+    includeAllAutoModels: true
+  }), [
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite'
+  ]);
+});
+
 test('auto fallback keeps image generation inside the image ladder', () => {
   assert.deepEqual(resolveAutoFallbackModelIds('gemini-3-pro-image', { type: 'image' }), [
     'gemini-3.1-flash-image',

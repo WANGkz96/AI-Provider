@@ -981,12 +981,20 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     };
 
     const targetType = targetModel.type || 'text';
+    const ecoPaidFallbackEligible = Boolean(
+      body.eco === true
+      && targetModel.provider === 'google'
+      && config.googleUseVertex
+      && config.ecoEnabled
+    );
+    const quotaAwareAutoFallback = ecoPaidFallbackEligible && body.use_fallback === 'auto';
     const fallbackModelIds = fallbackRequested
       ? resolveFallbackModelIds({
           useFallback: body.use_fallback,
           modelId: targetModel.id,
           type: targetType,
-          audioMode: targetModel.audioMode
+          audioMode: targetModel.audioMode,
+          includeAllAutoModels: quotaAwareAutoFallback
         })
       : [];
     const fallbackCandidates = [];
@@ -1020,13 +1028,6 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       }
       fallbackCandidates.push(fallbackModel);
     }
-
-    const ecoPaidFallbackEligible = Boolean(
-      body.eco === true
-      && targetModel.provider === 'google'
-      && config.googleUseVertex
-      && config.ecoEnabled
-    );
 
     const withFallbackMetadata = (response, metadata) => {
       if (!response || typeof response !== 'object' || typeof response.then === 'function') {
@@ -1095,11 +1096,15 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     const executeWithFallback = async ({ stream = false } = {}) => {
       const attempts = [];
       let lastError = null;
+      let autoFallbackAttempts = 0;
       const allCandidates = [targetModel, ...fallbackCandidates];
 
       for (let index = 0; index < allCandidates.length; index += 1) {
         const model = allCandidates[index];
         const isOriginal = index === 0;
+        if (quotaAwareAutoFallback && !isOriginal && autoFallbackAttempts >= 2) {
+          break;
+        }
         try {
           const response = await invokeModel(
             model,
@@ -1109,8 +1114,12 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
           attempts.push({
             model: model.id,
             success: true,
-            route: response?.metadata?.ecoRouting?.route || null
+            route: response?.metadata?.ecoRouting?.route || null,
+            consumedAutoAttempt: quotaAwareAutoFallback && !isOriginal
           });
+          if (quotaAwareAutoFallback && !isOriginal) {
+            autoFallbackAttempts += 1;
+          }
           return withFallbackMetadata(response, {
             requested: true,
             mode: body.use_fallback,
@@ -1120,16 +1129,31 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             selectedApiModelId: resolveApiModelIdForMode(model),
             fallbackUsed: !isOriginal,
             paidControlAttempt: false,
+            autoFallbackAttempts: quotaAwareAutoFallback ? autoFallbackAttempts : null,
             attempts,
             skipped: fallbackSkipped
           });
         } catch (error) {
           lastError = error;
+          const reason = error?.ecoRouting?.fallbackReason || error?.code || null;
+          const skippedWithoutProviderAttempt = Boolean(
+            quotaAwareAutoFallback
+            && !isOriginal
+            && (
+              String(reason).startsWith('no_eco_profile')
+              || String(reason).startsWith('ai_studio_unavailable')
+              || String(reason).startsWith('local_quota:')
+            )
+          );
+          if (quotaAwareAutoFallback && !isOriginal && !skippedWithoutProviderAttempt) {
+            autoFallbackAttempts += 1;
+          }
           attempts.push({
             model: model.id,
             success: false,
             error: error?.message || String(error),
-            reason: error?.ecoRouting?.fallbackReason || error?.code || null
+            reason,
+            consumedAutoAttempt: quotaAwareAutoFallback && !isOriginal && !skippedWithoutProviderAttempt
           });
         }
       }
@@ -1155,6 +1179,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             selectedApiModelId: generateParams.apiModelId,
             fallbackUsed: false,
             paidControlAttempt: true,
+            autoFallbackAttempts: quotaAwareAutoFallback ? autoFallbackAttempts : null,
             attempts,
             skipped: fallbackSkipped
           });
