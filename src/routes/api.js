@@ -975,15 +975,17 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         }
     };
 
+    const targetType = targetModel.type || 'text';
     const fallbackModelIds = fallbackRequested
       ? resolveFallbackModelIds({
           useFallback: body.use_fallback,
-          modelId: targetModel.id
+          modelId: targetModel.id,
+          type: targetType,
+          audioMode: targetModel.audioMode
         })
       : [];
     const fallbackCandidates = [];
     const fallbackSkipped = [];
-    const targetType = targetModel.type || 'text';
 
     for (const fallbackModelId of fallbackModelIds) {
       const fallbackModel = findConfiguredModel(getConfiguredModels(), fallbackModelId);
@@ -1001,6 +1003,10 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       }
       if ((fallbackModel.type || 'text') !== targetType) {
         fallbackSkipped.push({ model: fallbackModel.id, reason: 'type_mismatch' });
+        continue;
+      }
+      if (targetType === 'audio' && fallbackModel.audioMode !== targetModel.audioMode) {
+        fallbackSkipped.push({ model: fallbackModel.id, reason: 'audio_mode_mismatch' });
         continue;
       }
       if (!isModelAvailableForRequest(fallbackModel, body.eco)) {

@@ -279,14 +279,22 @@
     "provider": "google",
     "apiModelId": "veo-3.1-fast-generate-preview",
     "type": "video",
-    "videoMode": "veo"
+    "videoMode": "veo",
+    "aliases": [
+      "veo-3.1-fast-generate",
+      "models/veo-3.1-fast-generate-preview"
+    ]
   },
   {
     "id": "veo-3.1-generate-preview",
     "provider": "google",
     "apiModelId": "veo-3.1-generate-preview",
     "type": "video",
-    "videoMode": "veo"
+    "videoMode": "veo",
+    "aliases": [
+      "veo-3.1-generate",
+      "models/veo-3.1-generate-preview"
+    ]
   },
   {
     "id": "grok-4.1-fast-non-reasoning",
