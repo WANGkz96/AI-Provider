@@ -79,6 +79,21 @@ const withRoutingMetadata = (response, routing) => {
   };
 };
 
+const createEcoRoutingError = ({ reason, attempts = 0, model, quota = null } = {}) => {
+  const error = new Error(`AI Studio eco request failed: ${reason}`);
+  error.code = 'eco_routing_failed';
+  error.ecoRouting = {
+    requested: true,
+    route: null,
+    fallback: false,
+    fallbackReason: reason,
+    attempts,
+    model,
+    quota
+  };
+  return error;
+};
+
 export class EcoAvailabilityCache {
   constructor({ apiKey, ttlMs = 60 * 60 * 1000, fetchImpl = globalThis.fetch, now = () => Date.now() } = {}) {
     this.apiKey = apiKey;
@@ -183,7 +198,7 @@ export class EcoRouter {
     });
   }
 
-  async generate({ targetModel, params, primaryProvider } = {}) {
+  async generate({ targetModel, params, primaryProvider, allowPaidFallback = true } = {}) {
     if (!this.shouldHandle({ targetModel, params })) {
       return primaryProvider.generate(params);
     }
@@ -193,11 +208,23 @@ export class EcoRouter {
     );
     const profile = getModelProfile(targetModel);
     if (!profile || profile.enabled === false) {
+      if (!allowPaidFallback) {
+        throw createEcoRoutingError({
+          reason: 'no_eco_profile',
+          model: aiStudioModel
+        });
+      }
       return this.fallback({ targetModel, params, primaryProvider, reason: 'no_eco_profile' });
     }
 
     const availability = await this.availabilityCache.checkModel(aiStudioModel);
     if (!availability.ok) {
+      if (!allowPaidFallback) {
+        throw createEcoRoutingError({
+          reason: `ai_studio_unavailable:${availability.reason || 'unknown'}`,
+          model: aiStudioModel
+        });
+      }
       return this.fallback({
         targetModel,
         params,
@@ -230,6 +257,13 @@ export class EcoRouter {
     }
 
     if (!reservation.allowed) {
+      if (!allowPaidFallback) {
+        throw createEcoRoutingError({
+          reason: `local_quota:${reservation.reason}`,
+          model: aiStudioModel,
+          quota: reservation.snapshot
+        });
+      }
       return this.fallback({
         targetModel,
         params,
@@ -258,6 +292,14 @@ export class EcoRouter {
             status: 'fallback',
             usage: null
           });
+          if (!allowPaidFallback) {
+            throw createEcoRoutingError({
+              reason: `ai_studio_${category}`,
+              attempts,
+              model: aiStudioModel,
+              quota: reservation.snapshot
+            });
+          }
           return this.fallback({
             targetModel,
             params,
@@ -288,11 +330,22 @@ export class EcoRouter {
         quota: this.quotaLedger.snapshot(aiStudioModel, profile)
       });
     } catch (error) {
-      await this.quotaLedger.recordResult({
-        reservationId: reservation.reservationId,
-        status: 'fallback',
-        usage: null
-      });
+      if (error?.code !== 'eco_routing_failed') {
+        await this.quotaLedger.recordResult({
+          reservationId: reservation.reservationId,
+          status: 'fallback',
+          usage: null
+        });
+      }
+      if (!allowPaidFallback) {
+        if (error?.code === 'eco_routing_failed') throw error;
+        throw createEcoRoutingError({
+          reason: `ai_studio_${classifyEcoError(error)}`,
+          attempts,
+          model: aiStudioModel,
+          quota: reservation.snapshot
+        });
+      }
       return this.fallback({
         targetModel,
         params,

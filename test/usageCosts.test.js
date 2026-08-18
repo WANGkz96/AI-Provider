@@ -29,3 +29,26 @@ test('AI Studio eco cost is free and reports Vertex-equivalent savings', () => {
   assert.equal(freeCost.avoidedUsd, vertexCost.totalUsd);
   assert.ok(freeCost.avoidedUsd > 0);
 });
+
+test('fallback billing uses the model that actually returned the response', () => {
+  const cost = estimateRunCost({
+    provider: 'google',
+    model: 'gemini-3.6-flash',
+    apiModelId: 'gemini-3.6-flash',
+    executionProvider: 'vertex',
+    usage: { inputTokens: 1000, outputTokens: 2000 },
+    response: {
+      metadata: {
+        provider: {
+          useFallback: {
+            selectedModel: 'gemini-3.5-flash-lite',
+            selectedApiModelId: 'gemini-3.5-flash-lite'
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(cost.modelPricingId, 'gemini-3.5-flash-lite');
+  assert.equal(cost.totalUsd, 0.0053);
+});

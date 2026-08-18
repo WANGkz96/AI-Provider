@@ -20,6 +20,7 @@ import {
 } from '../services/ecoQuota.js';
 import { EcoAvailabilityCache, EcoRouter } from '../services/ecoRouting.js';
 import { EcoQuotaMonitor } from '../services/ecoMonitoring.js';
+import { resolveFallbackModelIds } from '../services/modelFallback.js';
 import {
   createAccessControlMiddleware,
   createConcurrencyLimiter,
@@ -261,6 +262,10 @@ const runSchema = z.object({
   
   stream: z.boolean().optional().default(false),
   eco: z.boolean().optional().default(false),
+  use_fallback: z.union([
+    z.literal('auto'),
+    z.array(z.string().min(1).max(200)).min(1).max(10)
+  ]).optional(),
   temperature: z.number().min(0).max(2).optional(),
   topP: z.number().min(0).max(1).optional(),
   top_p: z.number().min(0).max(1).optional(),
@@ -906,8 +911,9 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       return res.status(500).json({ error: `Provider '${targetModel.provider}' not initialized.` });
     }
 
+    const fallbackRequested = body.use_fallback !== undefined;
     const bufferedEcoRequest = body.eco && targetModel.provider === 'google' && config.googleUseVertex && config.ecoEnabled;
-    if (body.stream && usesAdvancedTextContract(body) && !bufferedEcoRequest) {
+    if (body.stream && usesAdvancedTextContract(body) && !bufferedEcoRequest && !fallbackRequested) {
       await writeRunLog({
         ok: false,
         statusCode: 400,
@@ -969,12 +975,211 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         }
     };
 
-    const isBufferedEcoStream = Boolean(
-      body.stream
-      && body.eco
+    const fallbackModelIds = fallbackRequested
+      ? resolveFallbackModelIds({
+          useFallback: body.use_fallback,
+          modelId: targetModel.id
+        })
+      : [];
+    const fallbackCandidates = [];
+    const fallbackSkipped = [];
+    const targetType = targetModel.type || 'text';
+
+    for (const fallbackModelId of fallbackModelIds) {
+      const fallbackModel = findConfiguredModel(getConfiguredModels(), fallbackModelId);
+      if (!fallbackModel) {
+        fallbackSkipped.push({ model: fallbackModelId, reason: 'not_configured' });
+        continue;
+      }
+      if (fallbackModel.id === targetModel.id) {
+        fallbackSkipped.push({ model: fallbackModel.id, reason: 'same_as_original' });
+        continue;
+      }
+      if (fallbackModel.provider !== targetModel.provider) {
+        fallbackSkipped.push({ model: fallbackModel.id, reason: 'provider_mismatch' });
+        continue;
+      }
+      if ((fallbackModel.type || 'text') !== targetType) {
+        fallbackSkipped.push({ model: fallbackModel.id, reason: 'type_mismatch' });
+        continue;
+      }
+      if (!isModelAvailableForRequest(fallbackModel, body.eco)) {
+        fallbackSkipped.push({ model: fallbackModel.id, reason: 'unavailable_in_current_mode' });
+        continue;
+      }
+      fallbackCandidates.push(fallbackModel);
+    }
+
+    const ecoPaidFallbackEligible = Boolean(
+      body.eco === true
       && targetModel.provider === 'google'
       && config.googleUseVertex
       && config.ecoEnabled
+    );
+
+    const withFallbackMetadata = (response, metadata) => {
+      if (!response || typeof response !== 'object' || typeof response.then === 'function') {
+        return response;
+      }
+      return {
+        ...response,
+        metadata: {
+          ...(response.metadata || {}),
+          useFallback: metadata
+        }
+      };
+    };
+
+    const withPaidEcoRouting = (response) => {
+      if (!ecoPaidFallbackEligible || !response || typeof response !== 'object') {
+        return response;
+      }
+      return {
+        ...response,
+        metadata: {
+          ...(response.metadata || {}),
+          ecoRouting: {
+            requested: true,
+            route: 'vertex',
+            fallback: true,
+            fallbackReason: 'fallback_exhausted',
+            attempts: 1,
+            model: String(generateParams.apiModelId || targetModel.id).replace(/^models\//, ''),
+            quota: null
+          }
+        }
+      };
+    };
+
+    const buildModelParams = (model, stream) => ({
+      ...generateParams,
+      model: model.id,
+      requestedModel: model.id,
+      apiModelId: resolveApiModelIdForMode(model),
+      adapterMode: model.adapterMode,
+      type: model.type || 'text',
+      audioMode: model.audioMode,
+      baseUrl: model.baseUrl,
+      imageMode: model.imageMode,
+      videoMode: model.videoMode,
+      stream
+    });
+
+    const invokeModel = async (model, params, { allowPaidFallback = true } = {}) => {
+      const modelProvider = providers[model.provider];
+      if (!modelProvider) {
+        throw new Error(`Provider '${model.provider}' not initialized.`);
+      }
+      if (model.provider === 'google') {
+        return ecoRouter.generate({
+          targetModel: model,
+          params,
+          primaryProvider: modelProvider,
+          allowPaidFallback
+        });
+      }
+      return modelProvider.generate(params);
+    };
+
+    const executeWithFallback = async ({ stream = false } = {}) => {
+      const attempts = [];
+      let lastError = null;
+      const allCandidates = [targetModel, ...fallbackCandidates];
+
+      for (let index = 0; index < allCandidates.length; index += 1) {
+        const model = allCandidates[index];
+        const isOriginal = index === 0;
+        try {
+          const response = await invokeModel(
+            model,
+            buildModelParams(model, stream),
+            { allowPaidFallback: !ecoPaidFallbackEligible }
+          );
+          attempts.push({
+            model: model.id,
+            success: true,
+            route: response?.metadata?.ecoRouting?.route || null
+          });
+          return withFallbackMetadata(response, {
+            requested: true,
+            mode: body.use_fallback,
+            originalModel: targetModel.id,
+            originalApiModelId: generateParams.apiModelId,
+            selectedModel: model.id,
+            selectedApiModelId: resolveApiModelIdForMode(model),
+            fallbackUsed: !isOriginal,
+            paidControlAttempt: false,
+            attempts,
+            skipped: fallbackSkipped
+          });
+        } catch (error) {
+          lastError = error;
+          attempts.push({
+            model: model.id,
+            success: false,
+            error: error?.message || String(error),
+            reason: error?.ecoRouting?.fallbackReason || error?.code || null
+          });
+        }
+      }
+
+      if (ecoPaidFallbackEligible) {
+        try {
+          const response = await providers[targetModel.provider].generate({
+            ...generateParams,
+            stream: false
+          });
+          attempts.push({
+            model: targetModel.id,
+            success: true,
+            route: 'vertex',
+            paidControlAttempt: true
+          });
+          return withFallbackMetadata(withPaidEcoRouting(response), {
+            requested: true,
+            mode: body.use_fallback,
+            originalModel: targetModel.id,
+            originalApiModelId: generateParams.apiModelId,
+            selectedModel: targetModel.id,
+            selectedApiModelId: generateParams.apiModelId,
+            fallbackUsed: false,
+            paidControlAttempt: true,
+            attempts,
+            skipped: fallbackSkipped
+          });
+        } catch (error) {
+          lastError = error;
+          attempts.push({
+            model: targetModel.id,
+            success: false,
+            route: 'vertex',
+            paidControlAttempt: true,
+            error: error?.message || String(error)
+          });
+        }
+      }
+
+      if (lastError) throw lastError;
+      throw new Error('No fallback model was available for this request.');
+    };
+
+    const executeRequest = async ({ stream = false } = {}) => {
+      if (fallbackRequested) {
+        return executeWithFallback({ stream });
+      }
+      if (targetModel.provider === 'google') {
+        return ecoRouter.generate({
+          targetModel,
+          params: { ...generateParams, stream },
+          primaryProvider: provider
+        });
+      }
+      return provider.generate({ ...generateParams, stream });
+    };
+
+    const isBufferedGeneration = Boolean(
+      body.stream
+      && (bufferedEcoRequest || fallbackRequested)
     );
 
     if (body.stream && targetModel.type === 'text') { // Only text models stream via SSE
@@ -983,12 +1188,8 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       res.setHeader('Connection', 'keep-alive');
 
       try {
-        if (isBufferedEcoStream) {
-          const bufferedResponse = await ecoRouter.generate({
-            targetModel,
-            params: { ...generateParams, stream: false },
-            primaryProvider: provider
-          });
+        if (isBufferedGeneration) {
+          const bufferedResponse = await executeRequest({ stream: false });
           const normalized = normalizeTextResponse(bufferedResponse);
           if (normalized.content) {
             res.write(`data: ${JSON.stringify({ content: normalized.content })}\n\n`);
@@ -1017,13 +1218,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
           return;
         }
 
-        const stream = targetModel.provider === 'google'
-          ? await ecoRouter.generate({
-              targetModel,
-              params: { ...generateParams, stream: true },
-              primaryProvider: provider
-            })
-          : await provider.generate({ ...generateParams, stream: true });
+        const stream = await executeRequest({ stream: true });
         const streamedParts = [];
         const streamedContent = [];
         const streamedThoughts = [];
@@ -1119,13 +1314,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       }
     } else {
       // Standard Response (Text or Audio)
-      const response = targetModel.provider === 'google'
-        ? await ecoRouter.generate({
-            targetModel,
-            params: { ...generateParams, stream: false },
-            primaryProvider: provider
-          })
-        : await provider.generate({ ...generateParams, stream: false });
+      const response = await executeRequest({ stream: false });
       
       if (targetModel.type === 'audio') {
           if (response.type === 'audio' && (response.audioUrl || response.data)) {

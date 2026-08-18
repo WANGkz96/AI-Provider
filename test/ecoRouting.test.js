@@ -128,3 +128,29 @@ test('eco is a no-op when the global Google mode is already AI Studio', async ()
   assert.equal(response.content, 'existing-ai-studio-path');
   assert.equal(calls, 1);
 });
+
+test('eco can fail without spending on the original Vertex model when fallback orchestration is active', async () => {
+  const { router, primaryProvider } = makeRouter({
+    aiGenerate: async () => {
+      const error = new Error('high demand');
+      error.status = 503;
+      throw error;
+    }
+  });
+
+  await assert.rejects(
+    () => router.generate({
+      targetModel,
+      params: { eco: true, apiModelId: 'gemini-test-vertex' },
+      primaryProvider,
+      allowPaidFallback: false
+    }),
+    (error) => {
+      assert.equal(error.code, 'eco_routing_failed');
+      assert.equal(error.ecoRouting.fallbackReason, 'ai_studio_high_demand');
+      assert.equal(error.ecoRouting.attempts, 2);
+      return true;
+    }
+  );
+  assert.equal(primaryProvider.calls, 0);
+});

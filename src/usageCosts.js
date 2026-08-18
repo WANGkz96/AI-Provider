@@ -363,7 +363,15 @@ export const estimateRunCost = (entry) => {
     };
   }
 
-  const modelId = normalizeModelId(entry.apiModelId || entry.model || entry.response?.metadata?.model);
+  const fallbackMetadata = entry?.response?.metadata?.provider?.useFallback
+    || entry?.response?.metadata?.useFallback
+    || null;
+  const modelId = normalizeModelId(
+    fallbackMetadata?.selectedApiModelId
+      || entry.apiModelId
+      || entry.model
+      || entry.response?.metadata?.model
+  );
   const pricing = GOOGLE_PRICING[modelId];
   if (!pricing) {
     return {
