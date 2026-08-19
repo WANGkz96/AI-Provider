@@ -786,7 +786,16 @@
                                      <span v-if="result.metadata?.duration !== null && result.metadata?.duration !== undefined">{{ result.metadata.duration }}s</span>
                                  </div>
                              </div>
-                             <audio controls :src="result.audioUrl || result.playbackUrl" class="h-8 w-48"></audio>
+                             <audio controls :src="result.playbackUrl" class="h-8 w-48"></audio>
+                             <a
+                                 v-if="result.downloadUrl"
+                                 :href="result.downloadUrl"
+                                 :download="result.fileName"
+                                 class="shrink-0 rounded-lg border border-slate-600 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-purple-400 hover:text-white"
+                                 title="Download audio"
+                             >
+                                 Download
+                             </a>
                         </div>
                     </div>
 
@@ -800,7 +809,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch, reactive, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, watch, reactive, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import Header from '../components/Header.vue';
@@ -903,6 +912,7 @@ const imageChatAttachments = ref([]);
 const messages = ref([]);
 const imageChatMessages = ref([]);
 const audioResults = ref([]);
+const audioObjectUrls = new Set();
 const imageResults = ref([]);
 const videoResults = ref([]);
 const models = ref([]);
@@ -2154,18 +2164,21 @@ const generateAudio = async () => {
         const res = await axios.post('/run', payload);
         
         if (res.data.type === 'audio') {
-            const playbackUrl = res.data.audioUrl
-                || (res.data.audio?.data ? `data:${res.data.audio.mimeType || 'audio/wav'};base64,${res.data.audio.data}` : null);
+            const mimeType = res.data.audio?.mimeType || 'audio/mpeg';
+            const playbackUrl = res.data.audioUrl || createAudioObjectUrl(res.data.audio?.data, mimeType);
 
             if (!playbackUrl) {
                 throw new Error('Audio response does not include playable data');
             }
 
+            const actualModel = res.data.model || selectedModel.value || 'audio';
             audioResults.value.unshift({
                 text: ttsInput.value,
                 lyrics: res.data.lyrics || res.data.metadata?.lyrics || null,
                 audioUrl: res.data.audioUrl,
                 playbackUrl,
+                downloadUrl: playbackUrl,
+                fileName: buildAudioFileName(actualModel, mimeType),
                 metadata: res.data.metadata
             });
         } else {
@@ -2179,7 +2192,59 @@ const generateAudio = async () => {
     }
 };
 
+const createAudioObjectUrl = (base64Data, mimeType) => {
+    if (!base64Data) return null;
+
+    const encodedData = String(base64Data).includes(',')
+        ? String(base64Data).split(',').pop()
+        : String(base64Data);
+    const binary = atob(encodedData);
+    const chunkSize = 0x8000;
+    const chunks = [];
+
+    for (let offset = 0; offset < binary.length; offset += chunkSize) {
+        const chunk = new Uint8Array(Math.min(chunkSize, binary.length - offset));
+        for (let index = 0; index < chunk.length; index += 1) {
+            chunk[index] = binary.charCodeAt(offset + index);
+        }
+        chunks.push(chunk);
+    }
+
+    const objectUrl = URL.createObjectURL(new Blob(chunks, { type: mimeType }));
+    audioObjectUrls.add(objectUrl);
+    return objectUrl;
+};
+
+const buildAudioFileName = (model, mimeType) => {
+    const safeModel = String(model || 'audio')
+        .replace(/[^a-z0-9._-]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || 'audio';
+    const extensionByMimeType = {
+        'audio/mpeg': 'mp3',
+        'audio/mp3': 'mp3',
+        'audio/wav': 'wav',
+        'audio/x-wav': 'wav',
+        'audio/ogg': 'ogg',
+        'audio/flac': 'flac',
+        'audio/aac': 'aac',
+        'audio/mp4': 'm4a',
+        'audio/x-m4a': 'm4a',
+        'audio/webm': 'webm'
+    };
+    const extension = extensionByMimeType[String(mimeType || '').toLowerCase()] || 'audio';
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${safeModel}-${timestamp}.${extension}`;
+};
+
 onMounted(init);
+
+onBeforeUnmount(() => {
+    for (const objectUrl of audioObjectUrls) {
+        URL.revokeObjectURL(objectUrl);
+    }
+    audioObjectUrls.clear();
+});
 </script>
 
 <style>
