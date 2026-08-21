@@ -36,6 +36,21 @@ export const MODEL_FALLBACK_GROUPS = Object.freeze({
   ])
 });
 
+const IMAGE_AUTO_FALLBACKS = Object.freeze({
+  'gemini-3-pro-image': Object.freeze([
+    'gemini-3.1-flash-image',
+    'gemini-3.1-flash-lite-image'
+  ]),
+  'gemini-3.1-flash-image': Object.freeze([
+    'gemini-3.1-flash-lite-image',
+    'gemini-3-pro-image'
+  ]),
+  'gemini-3.1-flash-lite-image': Object.freeze([
+    'gemini-3.1-flash-image',
+    'gemini-3-pro-image'
+  ])
+});
+
 const getFallbackGroupKey = ({ type = 'text', audioMode } = {}) => {
   if (type === 'image') return 'image';
   if (type === 'video') return 'video';
@@ -55,6 +70,14 @@ export const resolveAutoFallbackModelIds = (modelId, options = {}) => {
   const order = MODEL_FALLBACK_GROUPS[groupKey] || [];
   const maxModels = normalizedOptions.maxModels ?? 2;
   const canonical = normalizeModelId(modelId);
+
+  if (groupKey === 'image') {
+    const imageFallbacks = IMAGE_AUTO_FALLBACKS[canonical] || [];
+    return normalizedOptions.includeAll
+      ? [...imageFallbacks]
+      : imageFallbacks.slice(0, maxModels);
+  }
+
   const index = order.indexOf(canonical);
   if (index < 0) return [];
 

@@ -41,7 +41,12 @@ test('auto fallback keeps image generation inside the image ladder', () => {
     'gemini-3.1-flash-lite-image'
   ]);
   assert.deepEqual(resolveAutoFallbackModelIds('gemini-3.1-flash-image', { type: 'image' }), [
-    'gemini-3.1-flash-lite-image'
+    'gemini-3.1-flash-lite-image',
+    'gemini-3-pro-image'
+  ]);
+  assert.deepEqual(resolveAutoFallbackModelIds('gemini-3.1-flash-lite-image', { type: 'image' }), [
+    'gemini-3.1-flash-image',
+    'gemini-3-pro-image'
   ]);
 });
 

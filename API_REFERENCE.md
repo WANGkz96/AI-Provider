@@ -102,6 +102,14 @@ Text responses expose `metadata.provider.ecoRouting`; media responses expose
 `metadata.ecoRouting`. The metadata includes the actual route, fallback reason, attempts and a
 quota snapshot. Unknown quota profiles use Vertex until monitoring provides a usable profile.
 
+`use_fallback: "auto"` keeps fallback models inside the same media group. For image requests,
+`gemini-3.1-flash-lite-image` falls back to `gemini-3.1-flash-image` and then
+`gemini-3-pro-image`. These image-generation models currently have no Gemini API Free Tier, so
+`eco: true` remains valid but routes them through Vertex. If the requested paid image route
+returns `429 RESOURCE_EXHAUSTED`, the provider tries the compatible image fallbacks and reports
+the model that actually succeeded in the top-level `model` field. If every route is exhausted,
+`/run` returns HTTP 429 with `Retry-After`, `retryAfter` and `retryAfterSeconds`.
+
 `GET /eco/status` returns the local ledger state, AI Studio availability, per-model RPM/RPD/TPM
 usage and remaining counters, the next RPM reset, the next Pacific daily reset, and Monitoring
 status. It requires the same access key as the other protected endpoints.

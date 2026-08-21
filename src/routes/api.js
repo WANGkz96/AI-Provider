@@ -21,7 +21,9 @@ import {
 import { EcoAvailabilityCache, EcoRouter } from '../services/ecoRouting.js';
 import { EcoQuotaMonitor } from '../services/ecoMonitoring.js';
 import { resolveFallbackModelIds } from '../services/modelFallback.js';
+import { executeModelFallback } from '../services/fallbackExecution.js';
 import { resolveResponseModelId } from '../services/responseModel.js';
+import { normalizeUpstreamError } from '../services/upstreamError.js';
 import {
   createAccessControlMiddleware,
   createConcurrencyLimiter,
@@ -1029,20 +1031,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       fallbackCandidates.push(fallbackModel);
     }
 
-    const withFallbackMetadata = (response, metadata) => {
-      if (!response || typeof response !== 'object' || typeof response.then === 'function') {
-        return response;
-      }
-      return {
-        ...response,
-        metadata: {
-          ...(response.metadata || {}),
-          useFallback: metadata
-        }
-      };
-    };
-
-    const withPaidEcoRouting = (response) => {
+    const withPaidEcoRouting = (response, model = targetModel, fallbackReason = 'free_routes_exhausted', attempts = 1) => {
       if (!ecoPaidFallbackEligible || !response || typeof response !== 'object') {
         return response;
       }
@@ -1054,9 +1043,9 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
             requested: true,
             route: 'vertex',
             fallback: true,
-            fallbackReason: 'fallback_exhausted',
-            attempts: 1,
-            model: String(generateParams.apiModelId || targetModel.id).replace(/^models\//, ''),
+            fallbackReason,
+            attempts,
+            model: String(resolveApiModelIdForMode(model) || model.id).replace(/^models\//, ''),
             quota: null
           }
         }
@@ -1093,110 +1082,31 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       return modelProvider.generate(params);
     };
 
+    const invokePaidModel = async (model, params) => {
+      const modelProvider = providers[model.provider];
+      if (!modelProvider) {
+        throw new Error(`Provider '${model.provider}' not initialized.`);
+      }
+      return modelProvider.generate({ ...params, stream: false });
+    };
+
     const executeWithFallback = async ({ stream = false } = {}) => {
-      const attempts = [];
-      let lastError = null;
-      let autoFallbackAttempts = 0;
-      const allCandidates = [targetModel, ...fallbackCandidates];
-
-      for (let index = 0; index < allCandidates.length; index += 1) {
-        const model = allCandidates[index];
-        const isOriginal = index === 0;
-        if (quotaAwareAutoFallback && !isOriginal && autoFallbackAttempts >= 2) {
-          break;
-        }
-        try {
-          const response = await invokeModel(
-            model,
-            buildModelParams(model, stream),
-            { allowPaidFallback: !ecoPaidFallbackEligible }
-          );
-          attempts.push({
-            model: model.id,
-            success: true,
-            route: response?.metadata?.ecoRouting?.route || null,
-            consumedAutoAttempt: quotaAwareAutoFallback && !isOriginal
-          });
-          if (quotaAwareAutoFallback && !isOriginal) {
-            autoFallbackAttempts += 1;
-          }
-          return withFallbackMetadata(response, {
-            requested: true,
-            mode: body.use_fallback,
-            originalModel: targetModel.id,
-            originalApiModelId: generateParams.apiModelId,
-            selectedModel: model.id,
-            selectedApiModelId: resolveApiModelIdForMode(model),
-            fallbackUsed: !isOriginal,
-            paidControlAttempt: false,
-            autoFallbackAttempts: quotaAwareAutoFallback ? autoFallbackAttempts : null,
-            attempts,
-            skipped: fallbackSkipped
-          });
-        } catch (error) {
-          lastError = error;
-          const reason = error?.ecoRouting?.fallbackReason || error?.code || null;
-          const skippedWithoutProviderAttempt = Boolean(
-            quotaAwareAutoFallback
-            && !isOriginal
-            && (
-              String(reason).startsWith('no_eco_profile')
-              || String(reason).startsWith('ai_studio_unavailable')
-              || String(reason).startsWith('local_quota:')
-            )
-          );
-          if (quotaAwareAutoFallback && !isOriginal && !skippedWithoutProviderAttempt) {
-            autoFallbackAttempts += 1;
-          }
-          attempts.push({
-            model: model.id,
-            success: false,
-            error: error?.message || String(error),
-            reason,
-            consumedAutoAttempt: quotaAwareAutoFallback && !isOriginal && !skippedWithoutProviderAttempt
-          });
-        }
-      }
-
-      if (ecoPaidFallbackEligible) {
-        try {
-          const response = await providers[targetModel.provider].generate({
-            ...generateParams,
-            stream: false
-          });
-          attempts.push({
-            model: targetModel.id,
-            success: true,
-            route: 'vertex',
-            paidControlAttempt: true
-          });
-          return withFallbackMetadata(withPaidEcoRouting(response), {
-            requested: true,
-            mode: body.use_fallback,
-            originalModel: targetModel.id,
-            originalApiModelId: generateParams.apiModelId,
-            selectedModel: targetModel.id,
-            selectedApiModelId: generateParams.apiModelId,
-            fallbackUsed: false,
-            paidControlAttempt: true,
-            autoFallbackAttempts: quotaAwareAutoFallback ? autoFallbackAttempts : null,
-            attempts,
-            skipped: fallbackSkipped
-          });
-        } catch (error) {
-          lastError = error;
-          attempts.push({
-            model: targetModel.id,
-            success: false,
-            route: 'vertex',
-            paidControlAttempt: true,
-            error: error?.message || String(error)
-          });
-        }
-      }
-
-      if (lastError) throw lastError;
-      throw new Error('No fallback model was available for this request.');
+      return executeModelFallback({
+        targetModel,
+        fallbackCandidates,
+        fallbackSkipped,
+        useFallback: body.use_fallback,
+        generateParams,
+        ecoPaidFallbackEligible,
+        quotaAwareAutoFallback,
+        invokeModel,
+        invokePaidModel,
+        buildModelParams: (model) => buildModelParams(model, stream),
+        resolveApiModelId: resolveApiModelIdForMode,
+        decoratePaidResponse: (response, { model, reason, attempts }) => (
+          withPaidEcoRouting(response, model, reason, attempts)
+        )
+      });
     };
 
     const executeRequest = async ({ stream = false } = {}) => {
@@ -1576,6 +1486,17 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
       return res.status(400).json({ error: error.message });
     }
     console.error('Generation Error:', error);
+    const upstreamError = normalizeUpstreamError(error);
+    if (upstreamError) {
+      res.setHeader('Retry-After', String(upstreamError.retryAfterSeconds));
+      await writeRunLog({
+        ok: false,
+        statusCode: upstreamError.statusCode,
+        error: upstreamError.body.error,
+        details: upstreamError.body
+      });
+      return res.status(upstreamError.statusCode).json(upstreamError.body);
+    }
     await writeRunLog({
       ok: false,
       statusCode: 500,

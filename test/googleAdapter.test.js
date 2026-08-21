@@ -140,3 +140,67 @@ test('drops stale text thought signatures but preserves function-call signatures
 
   assert.equal(toolHistory.contents[1].parts[0].thoughtSignature, 'required-signature');
 });
+
+test('sequential image requests preserve provider_state for the next edit', async () => {
+  const adapter = new GoogleAdapter({
+    googleApiKey: 'test-key',
+    googleUseVertex: false
+  });
+  const requests = [];
+
+  adapter.imageAI.models.generateContentStream = async (request) => {
+    requests.push(request);
+    const responseNumber = requests.length;
+    return (async function* generateChunks() {
+      yield {
+        candidates: [{
+          content: {
+            role: 'model',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: responseNumber === 1 ? 'Zmlyc3Q=' : 'c2Vjb25k'
+                },
+                thoughtSignature: `image-signature-${responseNumber}`
+              },
+              { text: responseNumber === 1 ? 'First image' : 'Edited image' }
+            ]
+          }
+        }],
+        usageMetadata: {
+          promptTokenCount: 1,
+          candidatesTokenCount: 2,
+          totalTokenCount: 3
+        }
+      };
+    }());
+  };
+
+  const first = await adapter.generate({
+    model: 'gemini-3.1-flash-lite-image',
+    type: 'image',
+    prompt: 'Create the first frame',
+    image: { size: '1K', aspectRatio: '9:16' }
+  });
+  const second = await adapter.generate({
+    model: 'gemini-3.1-flash-lite-image',
+    type: 'image',
+    messages: [
+      { role: 'user', content: 'Create the first frame' },
+      {
+        role: 'assistant',
+        content: first.message.content,
+        provider_state: first.providerState
+      },
+      { role: 'user', content: 'Keep the characters and change the lighting' }
+    ],
+    image: { size: '1K', aspectRatio: '9:16' }
+  });
+
+  assert.equal(first.providerState.parts[0].inlineData.data, 'Zmlyc3Q=');
+  assert.equal(requests[1].contents[1].role, 'model');
+  assert.equal(requests[1].contents[1].parts[0].inlineData.data, 'Zmlyc3Q=');
+  assert.equal(requests[1].contents[1].parts[0].thoughtSignature, undefined);
+  assert.equal(second.providerState.parts[0].inlineData.data, 'c2Vjb25k');
+});

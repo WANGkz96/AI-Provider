@@ -231,6 +231,12 @@
       "aiStudio",
       "vertex"
     ],
+    "eco": {
+      "enabled": false,
+      "quotaSource": "official_no_free_tier",
+      "rpm": 0,
+      "rpd": 0
+    },
     "aliases": [
       "models/gemini-3.1-flash-lite-image"
     ]
@@ -248,6 +254,12 @@
       "aiStudio",
       "vertex"
     ],
+    "eco": {
+      "enabled": false,
+      "quotaSource": "official_no_free_tier",
+      "rpm": 0,
+      "rpd": 0
+    },
     "aliases": [
       "models/gemini-3.1-flash-image",
       "gemini-2.5-flash-image",
@@ -268,6 +280,12 @@
       "aiStudio",
       "vertex"
     ],
+    "eco": {
+      "enabled": false,
+      "quotaSource": "official_no_free_tier",
+      "rpm": 0,
+      "rpd": 0
+    },
     "aliases": [
       "models/gemini-3-pro-image",
       "gemini-3-pro-image-preview",

@@ -57,3 +57,20 @@ test('Gemini TTS models use their AI Studio Free Tier limits and IDs', () => {
     });
   }
 });
+
+test('Gemini image models are explicitly excluded from AI Studio Free Tier routing', () => {
+  for (const modelId of [
+    'gemini-3.1-flash-lite-image',
+    'gemini-3.1-flash-image',
+    'gemini-3-pro-image'
+  ]) {
+    const model = models.find((item) => item.id === modelId);
+    assert.ok(model, `${modelId} should be configured`);
+    assert.deepEqual(model.eco, {
+      enabled: false,
+      quotaSource: 'official_no_free_tier',
+      rpm: 0,
+      rpd: 0
+    });
+  }
+});
