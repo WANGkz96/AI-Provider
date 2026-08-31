@@ -58,6 +58,16 @@ test('Gemini TTS models use their AI Studio Free Tier limits and IDs', () => {
   }
 });
 
+test('Gemini 2.5 Pro TTS uses the correct ID in each Google mode', () => {
+  const model = models.find((entry) => entry.id === 'gemini-2.5-pro-tts');
+
+  assert.ok(model, 'gemini-2.5-pro-tts must stay configured');
+  assert.equal(model.aiStudioApiModelId, 'gemini-2.5-pro-preview-tts');
+  assert.equal(model.vertexApiModelId, 'gemini-2.5-pro-tts');
+  assert.deepEqual(model.availableIn, ['aiStudio', 'vertex']);
+  assert.ok(model.aliases.includes('gemini-2.5-pro-preview-tts'));
+});
+
 test('Gemini image models are explicitly excluded from AI Studio Free Tier routing', () => {
   for (const modelId of [
     'gemini-3.1-flash-lite-image',
