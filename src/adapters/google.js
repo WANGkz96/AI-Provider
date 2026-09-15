@@ -100,10 +100,11 @@ export class GoogleAdapter extends BaseAdapter {
 
     const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media });
     const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
+    const supportsSamplingParameters = !this.isGemini38FlashModel(model);
     const config = {
-      temperature: options?.temperature,
-      topP: options?.topP,
-      topK: options?.topK,
+      temperature: supportsSamplingParameters ? options?.temperature : undefined,
+      topP: supportsSamplingParameters ? options?.topP : undefined,
+      topK: supportsSamplingParameters ? options?.topK : undefined,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
       responseSchema: options?.responseJsonSchema ? undefined : options?.responseSchema,
@@ -421,6 +422,11 @@ export class GoogleAdapter extends BaseAdapter {
     return /^gemini-3([.-]|$)/.test(normalizedModel);
   }
 
+  isGemini38FlashModel(model) {
+    const normalizedModel = this.normalizeText(model).trim().toLowerCase();
+    return /^gemini-3\.8-flash([.-]|$)/.test(normalizedModel);
+  }
+
   isGemma4ThinkingModel(model) {
     const normalizedModel = this.normalizeText(model).trim().toLowerCase();
     return /^gemma-4([.-]|$)/.test(normalizedModel);
@@ -492,6 +498,15 @@ export class GoogleAdapter extends BaseAdapter {
     return 'HIGH';
   }
 
+  normalizeGemini38ThinkingLevel(level, budget) {
+    const explicitLevel = this.normalizeThinkingLevel(level);
+    if (explicitLevel === 'MINIMAL') return 'LOW';
+    if (explicitLevel) return explicitLevel;
+
+    const mappedLevel = this.mapGemini3ThinkingLevelFromBudget(budget);
+    return mappedLevel === 'MINIMAL' ? 'LOW' : mappedLevel;
+  }
+
   buildGeminiThinkingConfig(model, thinking) {
     if (!thinking || typeof thinking !== 'object') {
       return undefined;
@@ -506,8 +521,9 @@ export class GoogleAdapter extends BaseAdapter {
     const includeThoughts = thinking.includeThoughts === true ? true : undefined;
 
     if (this.isGemini3ThinkingModel(model)) {
-      const explicitLevel = this.normalizeThinkingLevel(thinking.level);
-      const thinkingLevel = explicitLevel ?? this.mapGemini3ThinkingLevelFromBudget(thinking.budget);
+      const thinkingLevel = this.isGemini38FlashModel(model)
+        ? this.normalizeGemini38ThinkingLevel(thinking.level, thinking.budget)
+        : (this.normalizeThinkingLevel(thinking.level) ?? this.mapGemini3ThinkingLevelFromBudget(thinking.budget));
       const config = this.removeUndefined({
         includeThoughts,
         thinkingLevel
@@ -1130,10 +1146,11 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
+    const supportsSamplingParameters = !this.isGemini38FlashModel(model);
     const config = {
-      temperature: options?.temperature,
-      topP: options?.topP,
-      topK: options?.topK,
+      temperature: supportsSamplingParameters ? options?.temperature : undefined,
+      topP: supportsSamplingParameters ? options?.topP : undefined,
+      topK: supportsSamplingParameters ? options?.topK : undefined,
       maxOutputTokens: options?.maxTokens,
       responseMimeType: options?.responseMimeType,
       responseSchema: options?.responseJsonSchema ? undefined : options?.responseSchema,

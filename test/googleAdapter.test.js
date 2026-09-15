@@ -87,6 +87,53 @@ test('Gemma 4 maps legacy thinking budgets to its binary API levels', () => {
   );
 });
 
+test('Gemini 3.8 strips unsupported sampling parameters and maps MINIMAL to LOW', async () => {
+  const adapter = new GoogleAdapter({
+    googleApiKey: 'test-key',
+    googleUseVertex: false
+  });
+  let request;
+
+  adapter.genAI.models.generateContent = async (value) => {
+    request = value;
+    return {
+      candidates: [{
+        content: { role: 'model', parts: [{ text: 'ok' }] },
+        finishReason: 'STOP'
+      }],
+      usageMetadata: {
+        promptTokenCount: 1,
+        candidatesTokenCount: 2,
+        totalTokenCount: 3
+      }
+    };
+  };
+
+  await adapter.generate({
+    model: 'gemini-3.8-flash',
+    type: 'text',
+    messages: [{ role: 'user', content: 'Say ok.' }],
+    stream: false,
+    options: {
+      temperature: 0.7,
+      topP: 0.95,
+      topK: 64,
+      maxTokens: 8192,
+      thinking: { level: 'MINIMAL', includeThoughts: true }
+    }
+  });
+
+  assert.equal(request.model, 'gemini-3.8-flash');
+  assert.equal(request.config.temperature, undefined);
+  assert.equal(request.config.topP, undefined);
+  assert.equal(request.config.topK, undefined);
+  assert.equal(request.config.maxOutputTokens, 8192);
+  assert.deepEqual(request.config.thinkingConfig, {
+    includeThoughts: true,
+    thinkingLevel: 'LOW'
+  });
+});
+
 test('drops stale text thought signatures but preserves function-call signatures', async () => {
   const adapter = new GoogleAdapter({
     googleApiKey: 'test-key',

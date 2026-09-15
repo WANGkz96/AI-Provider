@@ -8,6 +8,10 @@ import {
 } from '../src/services/modelFallback.js';
 
 test('auto fallback follows the text priority ladder and stops after two models', () => {
+  assert.deepEqual(resolveAutoFallbackModelIds('gemini-3.8-flash'), [
+    'gemini-3.7-flash',
+    'gemini-3.6-flash'
+  ]);
   assert.deepEqual(resolveAutoFallbackModelIds('gemini-3.6-flash'), [
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite'

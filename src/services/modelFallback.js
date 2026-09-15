@@ -6,6 +6,7 @@ export const MODEL_FALLBACK_GROUPS = Object.freeze({
   text: Object.freeze([
     'gemini-3.1-pro-preview',
     'gemini-3-pro-preview',
+    'gemini-3.8-flash',
     'gemini-3.7-flash',
     'gemini-3.6-flash',
     'gemini-3.5-flash',

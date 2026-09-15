@@ -135,6 +135,29 @@
     }
   },
   {
+    "id": "gemini-3.8-flash",
+    "provider": "google",
+    "apiModelId": "gemini-3.8-flash",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-3.8-flash",
+    "vertexApiModelId": "gemini-3.8-flash",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-3.8-flash"
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "provisional",
+      "rpm": 5,
+      "tpm": 250000,
+      "rpd": 20
+    }
+  },
+  {
     "id": "gemini-3.7-flash",
     "provider": "google",
     "apiModelId": "gemini-3.7-flash",

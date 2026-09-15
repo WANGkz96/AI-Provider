@@ -22,19 +22,27 @@ test('Gemini Flash models use the current AI Studio Free Tier limits', () => {
     'gemini-3-flash-preview',
     'gemini-3.5-flash',
     'gemini-3.6-flash',
-    'gemini-3.7-flash'
+    'gemini-3.7-flash',
+    'gemini-3.8-flash'
   ]) {
     const model = models.find((entry) => entry.id === modelId);
 
     assert.ok(model, `${modelId} must stay configured`);
-    assert.deepEqual(model.eco, {
-      enabled: true,
-      quotaSource: 'aiStudio',
-      rpm: 5,
-      tpm: 250000,
-      rpd: 20
-    });
+    assert.equal(model.eco.enabled, true);
+    assert.equal(model.eco.rpm, 5);
+    assert.equal(model.eco.tpm, 250000);
+    assert.equal(model.eco.rpd, 20);
   }
+});
+
+test('Gemini 3.8 Flash uses the same model ID in both Google modes', () => {
+  const model = models.find((entry) => entry.id === 'gemini-3.8-flash');
+
+  assert.ok(model, 'gemini-3.8-flash must be configured');
+  assert.equal(model.aiStudioApiModelId, 'gemini-3.8-flash');
+  assert.equal(model.vertexApiModelId, 'gemini-3.8-flash');
+  assert.deepEqual(model.availableIn, ['aiStudio', 'vertex']);
+  assert.deepEqual(model.aliases, ['models/gemini-3.8-flash']);
 });
 
 test('Gemini TTS models use their AI Studio Free Tier limits and IDs', () => {

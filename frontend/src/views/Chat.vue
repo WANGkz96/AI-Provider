@@ -896,6 +896,7 @@ const VIDEO_RESOLUTIONS = ['720p', '1080p'];
 const AUDIO_LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh'];
 const GEMINI_TTS_MODES = ['single', 'multi'];
 const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'];
+const GEMINI38_THINKING_LEVELS = ['LOW', 'MEDIUM', 'HIGH'];
 const GEMMA4_THINKING_LEVELS = ['MINIMAL', 'HIGH'];
 const MAX_MEDIA_ATTACHMENTS = 10;
 const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
@@ -994,12 +995,21 @@ const isGemma4Model = (model) => {
     return /^gemma-4([.-]|$)/.test(modelId);
 };
 
+const isGemini38FlashModel = (model) => {
+    const modelId = String(model?.apiModelId || model?.id || '').toLowerCase();
+    return /^gemini-3\.8-flash([.-]|$)/.test(modelId);
+};
+
 const getThinkingLevelsForModel = (model) => (
-    isGemma4Model(model) ? GEMMA4_THINKING_LEVELS : THINKING_LEVELS
+    isGemini38FlashModel(model)
+        ? GEMINI38_THINKING_LEVELS
+        : (isGemma4Model(model) ? GEMMA4_THINKING_LEVELS : THINKING_LEVELS)
 );
 
 const getDefaultThinkingLevelForModel = (model) => (
-    isGemma4Model(model) ? 'HIGH' : DEFAULT_TEXT_PARAMS.thinkingLevel
+    isGemini38FlashModel(model)
+        ? 'MEDIUM'
+        : (isGemma4Model(model) ? 'HIGH' : DEFAULT_TEXT_PARAMS.thinkingLevel)
 );
 
 const thinkingLevels = computed(() => getThinkingLevelsForModel(currentModel.value));
@@ -1215,7 +1225,9 @@ const buildStateQuery = () => {
     const safeTemperature = parseNumberQuery(toStringValue(params.temperature), 0, 2) ?? DEFAULT_TEXT_PARAMS.temperature;
     const safeTopP = parseNumberQuery(toStringValue(params.topP), 0, 1) ?? DEFAULT_TEXT_PARAMS.topP;
     const safeMaxTokens = parseIntegerQuery(toStringValue(params.maxTokens), 1);
-    const safeThinkingLevel = parseEnumQuery(toStringValue(params.thinking.level), THINKING_LEVELS) ?? DEFAULT_TEXT_PARAMS.thinkingLevel;
+    const safeThinkingLevels = getThinkingLevelsForModel(currentModel.value);
+    const safeThinkingLevel = parseEnumQuery(toStringValue(params.thinking.level), safeThinkingLevels)
+        ?? getDefaultThinkingLevelForModel(currentModel.value);
     const safeThinkingBudget = parseIntegerQuery(toStringValue(params.thinking.budget), -1) ?? DEFAULT_TEXT_PARAMS.thinkingBudget;
 
     const safeImageSize = parseEnumQuery(toStringValue(imageParams.size), IMAGE_SIZES) ?? DEFAULT_IMAGE_PARAMS.size;
