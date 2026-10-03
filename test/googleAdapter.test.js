@@ -251,3 +251,140 @@ test('sequential image requests preserve provider_state for the next edit', asyn
   assert.equal(requests[1].contents[1].parts[0].thoughtSignature, undefined);
   assert.equal(second.providerState.parts[0].inlineData.data, 'c2Vjb25k');
 });
+
+const samplePcmWav = (adapter) => adapter.wrapPcmAsWav(Buffer.alloc(24000 * 2), {
+  sampleRateHz: 24000,
+  channels: 1,
+  bitsPerSample: 16
+});
+
+const sampleTtsResponse = (data, mimeType) => ({
+  candidates: [{ content: { role: 'model', parts: [{ inlineData: { data: data.toString('base64'), mimeType } }] } }],
+  usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 20, totalTokenCount: 32 }
+});
+
+const dialoguePrompt = [
+  'Do not speak anything except the transcript after the heading.',
+  '### TRANSCRIPT',
+  'Milo: [gasp] Look at this, Noxie.',
+  'Noxie: [chuckles] You are impossible, Milo.',
+  'Milo: [whispering] Listen closely.',
+  '### END NOTES',
+  'Do not read these notes.'
+].join('\n');
+
+const dialogueSpeakers = [
+  { speaker: 'Milo', voiceName: 'Puck' },
+  { speaker: 'Noxie', voiceName: 'Aoede' }
+];
+
+test('Gemini 3.8 Flash and Flash-Lite use structured multi-speaker transcript parts', async (t) => {
+  for (const model of ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts']) {
+    await t.test(model, async () => {
+      const adapter = new GoogleAdapter({
+        googleApiKey: 'test-key',
+        googleUseVertex: false
+      });
+      let request;
+      adapter.genAI.models.generateContent = async (value) => {
+        request = value;
+        return sampleTtsResponse(samplePcmWav(adapter), 'audio/wav');
+      };
+
+      const result = await adapter.generate({
+        model,
+        type: 'audio',
+        audioMode: 'gemini-tts',
+        prompt: dialoguePrompt,
+        options: { ttsMode: 'multi', speakers: dialogueSpeakers }
+      });
+
+      assert.deepEqual(request.contents[0].parts, [
+        { text: '<gasp> Look at this, Noxie.', speechMetadata: { speaker: 'Milo' } },
+        { text: '<laugh> You are impossible, Milo.', speechMetadata: { speaker: 'Noxie' } },
+        { text: 'Listen closely.', speechMetadata: { speaker: 'Milo', style: 'whispering' } }
+      ]);
+      assert.deepEqual(request.config.speechConfig.multiSpeakerVoiceConfig.speakerVoiceConfigs, [
+        { speaker: 'Milo', voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } },
+        { speaker: 'Noxie', voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
+      ]);
+      assert.equal(JSON.stringify(request.contents).includes('Do not speak anything'), false);
+      assert.equal(result.mimeType, 'audio/wav');
+      assert.equal(result.duration, 1);
+      assert.equal(Buffer.from(result.data, 'base64').toString('ascii', 0, 4), 'RIFF');
+    });
+  }
+});
+
+test('Gemini 3.8 single-speaker TTS uses the selected Puck voice and transcript-only input', async () => {
+  const adapter = new GoogleAdapter({ googleApiKey: 'test-key', googleUseVertex: false });
+  let request;
+  adapter.genAI.models.generateContent = async (value) => {
+    request = value;
+    return sampleTtsResponse(samplePcmWav(adapter), 'audio/wav');
+  };
+
+  const result = await adapter.generate({
+    model: 'gemini-3.8-flash-tts',
+    type: 'audio',
+    prompt: dialoguePrompt,
+    options: { ttsMode: 'single', voiceName: 'Puck' }
+  });
+
+  assert.deepEqual(request.contents[0].parts, [
+    { text: '<gasp> Look at this, Noxie.' },
+    { text: '<laugh> You are impossible, Milo.' },
+    { text: 'Listen closely.', speechMetadata: { style: 'whispering' } }
+  ]);
+  assert.deepEqual(request.config.speechConfig.voiceConfig, { voice: 'Puck' });
+  assert.equal(result.usedVoice, 'Puck');
+  assert.equal(result.duration, 1);
+});
+
+test('Gemini 3.8 Vertex TTS sends requests through the global Gemini Enterprise client', async () => {
+  const adapter = new GoogleAdapter({
+    googleUseVertex: true,
+    googleCloudProject: 'test-project',
+    googleCloudLocation: 'us-central1'
+  });
+  let request;
+  adapter.enterpriseAI.models.generateContent = async (value) => {
+    request = value;
+    return sampleTtsResponse(samplePcmWav(adapter), 'audio/wav');
+  };
+
+  await adapter.generate({
+    model: 'gemini-3.8-flash-tts',
+    type: 'audio',
+    prompt: dialoguePrompt,
+    options: { ttsMode: 'multi', speakers: dialogueSpeakers }
+  });
+
+  assert.equal(request.model, 'gemini-3.8-flash-tts');
+  assert.equal(request.contents[0].parts.length, 3);
+});
+
+test('legacy Gemini 2.5 TTS keeps the prompt format and wraps raw PCM exactly once', async () => {
+  const adapter = new GoogleAdapter({ googleApiKey: 'test-key', googleUseVertex: false });
+  let request;
+  adapter.genAI.models.generateContent = async (value) => {
+    request = value;
+    return sampleTtsResponse(Buffer.alloc(24000 * 2), 'audio/L16;codec=pcm;rate=24000');
+  };
+
+  const result = await adapter.generate({
+    model: 'gemini-2.5-flash-preview-tts',
+    type: 'audio',
+    prompt: dialoguePrompt,
+    options: { ttsMode: 'multi', speakers: dialogueSpeakers }
+  });
+
+  assert.deepEqual(request.contents[0].parts, [{ text: dialoguePrompt }]);
+  assert.deepEqual(request.config.speechConfig.multiSpeakerVoiceConfig.speakerVoiceConfigs, [
+    { speaker: 'Milo', voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } },
+    { speaker: 'Noxie', voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
+  ]);
+  assert.equal(result.duration, 1);
+  assert.equal(Buffer.from(result.data, 'base64').toString('ascii', 0, 4), 'RIFF');
+  assert.equal(Buffer.from(result.data, 'base64').readUInt32LE(4), Buffer.from(result.data, 'base64').length - 8);
+});

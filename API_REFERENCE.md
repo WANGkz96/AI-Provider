@@ -362,11 +362,21 @@ Frontend migration from old `<think>...</think>` parsing:
 {
   "mode": "multi",
   "speakers": [
-    { "speaker": "Joe", "voiceName": "Kore" },
-    { "speaker": "Jane", "voiceName": "Puck" }
+    { "speaker": "Milo", "voiceName": "Puck" },
+    { "speaker": "Noxie", "voiceName": "Aoede" }
   ]
 }
 ```
+
+Gemini 3.8 Flash TTS and Flash-Lite TTS use structured transcript turns. When `prompt`
+contains a `### TRANSCRIPT` heading, only the transcript below it is sent to these models;
+each `Speaker: line` becomes one part with matching speaker metadata. Square-bracket vocal
+cues such as `[gasp]` and `[chuckles]` are converted to Gemini 3.8 inline vocal tags, and
+delivery cues such as `[whispering]` become turn-level style metadata. Include one
+`tts.speakers` entry for every speaker name in the transcript. Legacy TTS models continue
+to receive the full prompt and their existing speaker-prefix format. All Gemini TTS model
+outputs are returned as a single `audio/wav` response; raw PCM from legacy models is
+wrapped once, while WAV returned by Gemini 3.8 is preserved.
 
 #### Lyria 3 Music
 

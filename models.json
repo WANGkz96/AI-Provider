@@ -505,5 +505,37 @@
     "provider": "chatterbox",
     "baseUrl": "http://localhost:8000",
     "type": "audio"
+  },
+  {
+    "id": "gemini-3.8-flash-tts",
+    "provider": "google",
+    "apiModelId": "gemini-3.8-flash-tts",
+    "aiStudioApiModelId": "gemini-3.8-flash-tts",
+    "vertexApiModelId": "gemini-3.8-flash-tts",
+    "type": "audio",
+    "audioMode": "gemini-tts",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-3.8-flash-tts"
+    ]
+  },
+  {
+    "id": "gemini-3.8-flash-lite-tts",
+    "provider": "google",
+    "apiModelId": "gemini-3.8-flash-lite-tts",
+    "aiStudioApiModelId": "gemini-3.8-flash-lite-tts",
+    "vertexApiModelId": "gemini-3.8-flash-lite-tts",
+    "type": "audio",
+    "audioMode": "gemini-tts",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-3.8-flash-lite-tts"
+    ]
   }
 ]

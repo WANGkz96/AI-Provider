@@ -42,6 +42,20 @@ export class GoogleAdapter extends BaseAdapter {
       }
     });
 
+    // Gemini 3.8 TTS is served through the Gemini Enterprise API on Vertex,
+    // whose endpoint is global and whose client option is `enterprise`.
+    this.enterpriseAI = this.useVertex
+      ? new GoogleGenAI({
+          enterprise: true,
+          project: this.project,
+          location: 'global',
+          maxRetries: this.maxRetries,
+          httpOptions: {
+            timeout: this.httpTimeoutMs
+          }
+        })
+      : this.genAI;
+
     if (this.useVertex && this.storageBucket) {
       this.gcs = new Storage({ projectId: this.project });
     }
@@ -1347,6 +1361,7 @@ export class GoogleAdapter extends BaseAdapter {
       throw new Error('No prompt provided for TTS generation');
     }
 
+    const isGemini38Tts = this.isGemini38TtsModel(model);
     const ttsMode = options?.ttsMode === 'multi' ? 'multi' : 'single';
     if (ttsMode === 'multi' && model === 'gemini-2.5-flash-lite-preview-tts') {
       throw new Error('gemini-2.5-flash-lite-preview-tts supports single-speaker speech only');
@@ -1357,9 +1372,22 @@ export class GoogleAdapter extends BaseAdapter {
     let speechConfig;
     let usedVoice = null;
     let usedSpeakers = null;
+    let contents;
 
     if (ttsMode === 'multi') {
-      const normalizedSpeakers = this.normalizeGeminiTtsSpeakers(options?.speakers);
+      const transcript = isGemini38Tts ? this.extractGeminiTtsTranscript(promptText) : null;
+      const turns = isGemini38Tts ? this.parseGeminiTtsTurns(transcript) : null;
+      const transcriptSpeakers = turns?.map((turn) => turn.speaker).filter(Boolean);
+      const normalizedSpeakers = this.normalizeGeminiTtsSpeakers(options?.speakers, transcriptSpeakers);
+      if (isGemini38Tts) {
+        if (normalizedSpeakers.length !== 2) {
+          throw new Error('Gemini 3.8 multi-speaker TTS requires exactly two configured speakers');
+        }
+        contents = [{
+          role: 'user',
+          parts: this.buildGemini38TtsParts(turns, normalizedSpeakers, true)
+        }];
+      }
       speechConfig = this.removeUndefined({
         languageCode,
         multiSpeakerVoiceConfig: {
@@ -1378,23 +1406,23 @@ export class GoogleAdapter extends BaseAdapter {
       const voiceName = options?.voiceName || 'Kore';
       speechConfig = this.removeUndefined({
         languageCode,
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName
-          }
-        }
+        voiceConfig: isGemini38Tts
+          ? { voice: voiceName }
+          : { prebuiltVoiceConfig: { voiceName } }
       });
       usedVoice = voiceName;
+      if (isGemini38Tts) {
+        const transcript = this.extractGeminiTtsTranscript(promptText);
+        contents = [{
+          role: 'user',
+          parts: this.buildGemini38TtsParts(this.parseGeminiTtsTurns(transcript), [], false)
+        }];
+      }
     }
 
-    const response = await this.imageAI.models.generateContent({
+    const response = await (isGemini38Tts ? this.enterpriseAI : this.imageAI).models.generateContent({
       model,
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: String(promptText) }]
-        }
-      ],
+      contents: contents || [{ role: 'user', parts: [{ text: String(promptText) }] }],
       config: {
         responseModalities: ['AUDIO'],
         speechConfig
@@ -1406,13 +1434,24 @@ export class GoogleAdapter extends BaseAdapter {
       throw new Error('Gemini TTS returned no audio payload');
     }
 
-    const pcmBuffer = Buffer.from(inlineAudio.data, 'base64');
-    const wavBuffer = this.wrapPcmAsWav(pcmBuffer, {
-      sampleRateHz,
-      channels: 1,
-      bitsPerSample: 16
-    });
-    const duration = this.estimatePcmDurationSeconds(pcmBuffer, sampleRateHz, 1, 16);
+    const sourceBuffer = Buffer.isBuffer(inlineAudio.data)
+      ? inlineAudio.data
+      : Buffer.from(inlineAudio.data, 'base64');
+    const wavInfo = this.readWavInfo(sourceBuffer);
+    if (!wavInfo && /audio\/(?:x-)?wav|audio\/wave/i.test(String(inlineAudio.mimeType || ''))) {
+      throw new Error('Gemini TTS marked its response as WAV but returned an invalid WAV audio payload');
+    }
+    const wavBuffer = wavInfo
+      ? sourceBuffer
+      : this.wrapPcmAsWav(sourceBuffer, {
+          sampleRateHz,
+          channels: 1,
+          bitsPerSample: 16
+        });
+    const outputSampleRateHz = wavInfo?.sampleRateHz || sampleRateHz;
+    const duration = wavInfo
+      ? Number((wavInfo.dataSize / (wavInfo.sampleRateHz * wavInfo.channels * (wavInfo.bitsPerSample / 8))).toFixed(2))
+      : this.estimatePcmDurationSeconds(sourceBuffer, sampleRateHz, 1, 16);
 
     return {
       type: 'audio',
@@ -1424,8 +1463,8 @@ export class GoogleAdapter extends BaseAdapter {
       metadata: {
         mode: 'gemini-tts',
         model,
-        sourceMimeType: inlineAudio.mimeType || 'audio/pcm',
-        sampleRateHz,
+        sourceMimeType: inlineAudio.mimeType || (wavInfo ? 'audio/wav' : 'audio/pcm'),
+        sampleRateHz: outputSampleRateHz,
         languageCode,
         voice: usedVoice,
         speakers: usedSpeakers
@@ -1433,22 +1472,133 @@ export class GoogleAdapter extends BaseAdapter {
     };
   }
 
-  normalizeGeminiTtsSpeakers(speakers) {
+  isGemini38TtsModel(model) {
+    const normalizedModel = String(model || '').trim().replace(/^models\//, '');
+    return /^gemini-3\.8-flash(?:-lite)?-tts(?:-|$)/i.test(normalizedModel);
+  }
+
+  extractGeminiTtsTranscript(prompt) {
+    const lines = String(prompt || '').replace(/\r\n?/g, '\n').split('\n');
+    let transcriptStart = -1;
+    for (let index = 0; index < lines.length; index += 1) {
+      if (/^\s*###\s+TRANSCRIPT\s*$/i.test(lines[index])) {
+        transcriptStart = index + 1;
+      }
+    }
+
+    const transcriptLines = transcriptStart < 0 ? lines : lines.slice(transcriptStart);
+    let firstContentLine = transcriptLines.findIndex((line) => line.trim());
+    if (firstContentLine < 0) {
+      throw new Error('Gemini TTS transcript is empty');
+    }
+
+    const contentLines = transcriptLines.slice(firstContentLine);
+    const nextSection = contentLines.findIndex((line) => /^\s*#{2,}\s+/.test(line));
+    const transcript = (nextSection < 0 ? contentLines : contentLines.slice(0, nextSection)).join('\n').trim();
+    if (!transcript) {
+      throw new Error('Gemini TTS transcript is empty');
+    }
+    return transcript;
+  }
+
+  parseGeminiTtsTurns(transcript) {
+    const turns = [];
+    for (const rawLine of String(transcript || '').split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      const speakerLine = line.match(/^([^:\n]{1,64}):\s*(.*)$/u);
+      if (speakerLine) {
+        turns.push({ speaker: speakerLine[1].trim(), text: speakerLine[2] });
+      } else if (turns.length > 0) {
+        turns[turns.length - 1].text += `\n${line}`;
+      } else {
+        turns.push({ speaker: null, text: line });
+      }
+    }
+    return turns.filter((turn) => turn.text.trim());
+  }
+
+  buildGemini38TtsParts(turns, speakers, multiSpeaker) {
+    if (!Array.isArray(turns) || turns.length === 0) {
+      throw new Error('Gemini TTS transcript does not contain any speakable text');
+    }
+
+    const speakerNames = new Set(speakers.map(({ speaker }) => speaker.toLowerCase()));
+    return turns.map((turn) => {
+      if (multiSpeaker && turn.speaker && !speakerNames.has(turn.speaker.toLowerCase())) {
+        throw new Error(`Gemini 3.8 TTS transcript speaker '${turn.speaker}' is missing from tts.speakers`);
+      }
+      if (multiSpeaker && !turn.speaker && turns.length > 1) {
+        throw new Error('Gemini 3.8 multi-speaker TTS requires a speaker label on every dialogue turn');
+      }
+
+      const styles = [];
+      const text = turn.text.replace(/\[([^\[\]]+)\]/g, (tag, rawCue) => {
+        const cue = rawCue.trim().toLowerCase();
+        const inlineCue = {
+          gasp: 'gasp', gasps: 'gasp',
+          sigh: 'sigh', sighs: 'sigh',
+          laugh: 'laugh', laughs: 'laugh', chuckle: 'laugh', chuckles: 'laugh',
+          giggle: 'laugh', giggles: 'laugh',
+          cough: 'cough', coughs: 'cough', yawn: 'yawn', yawns: 'yawn',
+          breath: 'breath', breathing: 'breath', 'short pause': 'short pause'
+        }[cue];
+        if (inlineCue) return `<${inlineCue}>`;
+        styles.push(rawCue.trim());
+        return '';
+      }).trim();
+
+      const speechMetadata = this.removeUndefined({
+        speaker: multiSpeaker ? (turn.speaker || speakers[0]?.speaker) : undefined,
+        style: styles.length > 0 ? styles.join(', ') : undefined
+      });
+      return this.removeUndefined({
+        text,
+        speechMetadata: Object.keys(speechMetadata).length > 0 ? speechMetadata : undefined
+      });
+    });
+  }
+
+  normalizeGeminiTtsSpeakers(speakers, transcriptSpeakers = []) {
     const defaultSpeakers = [
       { speaker: 'Speaker1', voiceName: 'Kore' },
       { speaker: 'Speaker2', voiceName: 'Puck' }
     ];
 
     if (!Array.isArray(speakers) || speakers.length === 0) {
+      const distinctTranscriptSpeakers = [...new Set(transcriptSpeakers)];
+      if (distinctTranscriptSpeakers.length > 2) {
+        throw new Error('Gemini multi-speaker TTS supports at most two distinct speakers');
+      }
+      if (distinctTranscriptSpeakers.length > 0) {
+        const inferredSpeakers = distinctTranscriptSpeakers.map((speaker, index) => ({
+          speaker,
+          voiceName: defaultSpeakers[index]?.voiceName || 'Kore'
+        }));
+        if (inferredSpeakers.length === 1) {
+          inferredSpeakers.push({ ...defaultSpeakers[1] });
+        }
+        return inferredSpeakers;
+      }
       return defaultSpeakers;
     }
 
-    return speakers
+    const normalizedSpeakers = speakers
       .slice(0, 2)
       .map((entry, index) => ({
         speaker: this.normalizeText(entry?.speaker).trim() || defaultSpeakers[index]?.speaker || `Speaker${index + 1}`,
         voiceName: this.normalizeText(entry?.voiceName).trim() || defaultSpeakers[index]?.voiceName || 'Kore'
       }));
+
+    if (transcriptSpeakers.length > 0) {
+      const distinctTranscriptSpeakers = [...new Set(transcriptSpeakers)];
+      if (distinctTranscriptSpeakers.length > 2) {
+        throw new Error('Gemini multi-speaker TTS supports at most two distinct speakers');
+      }
+    }
+
+    return normalizedSpeakers;
   }
 
   extractGeminiInlineAudio(response) {
@@ -1484,6 +1634,40 @@ export class GoogleAdapter extends BaseAdapter {
     const bytesPerSecond = sampleRateHz * channels * (bitsPerSample / 8);
     if (bytesPerSecond <= 0) return null;
     return Number((pcmBuffer.length / bytesPerSecond).toFixed(2));
+  }
+
+  readWavInfo(audioBuffer) {
+    if (audioBuffer.length < 12 || audioBuffer.toString('ascii', 0, 4) !== 'RIFF'
+      || audioBuffer.toString('ascii', 8, 12) !== 'WAVE') {
+      return null;
+    }
+
+    let sampleRateHz;
+    let channels;
+    let bitsPerSample;
+    let dataSize = 0;
+    let offset = 12;
+    while (offset + 8 <= audioBuffer.length) {
+      const chunkName = audioBuffer.toString('ascii', offset, offset + 4);
+      const chunkSize = audioBuffer.readUInt32LE(offset + 4);
+      const chunkStart = offset + 8;
+      if (chunkStart + chunkSize > audioBuffer.length) {
+        throw new Error('Gemini TTS returned a truncated WAV audio payload');
+      }
+      if (chunkName === 'fmt ' && chunkSize >= 16) {
+        channels = audioBuffer.readUInt16LE(chunkStart + 2);
+        sampleRateHz = audioBuffer.readUInt32LE(chunkStart + 4);
+        bitsPerSample = audioBuffer.readUInt16LE(chunkStart + 14);
+      } else if (chunkName === 'data') {
+        dataSize += chunkSize;
+      }
+      offset = chunkStart + chunkSize + (chunkSize % 2);
+    }
+
+    if (!sampleRateHz || !channels || !bitsPerSample || !dataSize) {
+      throw new Error('Gemini TTS returned an invalid WAV audio payload');
+    }
+    return { sampleRateHz, channels, bitsPerSample, dataSize };
   }
 
   async generateImage({ model, prompt, messages, media, image, imageMode }) {
