@@ -272,6 +272,11 @@ const dialoguePrompt = [
   '### END NOTES',
   'Do not read these notes.'
 ].join('\n');
+const dialogueTranscript = [
+  'Milo: [gasp] Look at this, Noxie.',
+  'Noxie: [chuckles] You are impossible, Milo.',
+  'Milo: [whispering] Listen closely.'
+].join('\n');
 
 const dialogueSpeakers = [
   { speaker: 'Milo', voiceName: 'Puck' },
@@ -364,7 +369,7 @@ test('Gemini 3.8 Vertex TTS sends requests through the global Gemini Enterprise 
   assert.equal(request.contents[0].parts.length, 3);
 });
 
-test('legacy Gemini 2.5 TTS keeps the prompt format and wraps raw PCM exactly once', async () => {
+test('legacy Gemini 2.5 TTS extracts marked transcript and wraps raw PCM exactly once', async () => {
   const adapter = new GoogleAdapter({ googleApiKey: 'test-key', googleUseVertex: false });
   let request;
   adapter.genAI.models.generateContent = async (value) => {
@@ -379,7 +384,7 @@ test('legacy Gemini 2.5 TTS keeps the prompt format and wraps raw PCM exactly on
     options: { ttsMode: 'multi', speakers: dialogueSpeakers }
   });
 
-  assert.deepEqual(request.contents[0].parts, [{ text: dialoguePrompt }]);
+  assert.deepEqual(request.contents[0].parts, [{ text: dialogueTranscript }]);
   assert.deepEqual(request.config.speechConfig.multiSpeakerVoiceConfig.speakerVoiceConfigs, [
     { speaker: 'Milo', voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Puck' } } },
     { speaker: 'Noxie', voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
@@ -387,4 +392,23 @@ test('legacy Gemini 2.5 TTS keeps the prompt format and wraps raw PCM exactly on
   assert.equal(result.duration, 1);
   assert.equal(Buffer.from(result.data, 'base64').toString('ascii', 0, 4), 'RIFF');
   assert.equal(Buffer.from(result.data, 'base64').readUInt32LE(4), Buffer.from(result.data, 'base64').length - 8);
+});
+
+test('legacy Gemini TTS preserves unmarked plain prompt text', async () => {
+  const adapter = new GoogleAdapter({ googleApiKey: 'test-key', googleUseVertex: false });
+  let request;
+  adapter.genAI.models.generateContent = async (value) => {
+    request = value;
+    return sampleTtsResponse(samplePcmWav(adapter), 'audio/wav');
+  };
+
+  const prompt = 'Speak warmly: The station doors open at nine.';
+  await adapter.generate({
+    model: 'gemini-2.5-flash-preview-tts',
+    type: 'audio',
+    prompt,
+    options: { ttsMode: 'single', voiceName: 'Puck' }
+  });
+
+  assert.deepEqual(request.contents[0].parts, [{ text: prompt }]);
 });

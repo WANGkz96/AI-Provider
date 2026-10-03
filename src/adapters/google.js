@@ -1362,6 +1362,7 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     const isGemini38Tts = this.isGemini38TtsModel(model);
+    const transcript = this.extractGeminiTtsTranscript(promptText);
     const ttsMode = options?.ttsMode === 'multi' ? 'multi' : 'single';
     if (ttsMode === 'multi' && model === 'gemini-2.5-flash-lite-preview-tts') {
       throw new Error('gemini-2.5-flash-lite-preview-tts supports single-speaker speech only');
@@ -1372,10 +1373,9 @@ export class GoogleAdapter extends BaseAdapter {
     let speechConfig;
     let usedVoice = null;
     let usedSpeakers = null;
-    let contents;
+    let contents = [{ role: 'user', parts: [{ text: transcript }] }];
 
     if (ttsMode === 'multi') {
-      const transcript = isGemini38Tts ? this.extractGeminiTtsTranscript(promptText) : null;
       const turns = isGemini38Tts ? this.parseGeminiTtsTurns(transcript) : null;
       const transcriptSpeakers = turns?.map((turn) => turn.speaker).filter(Boolean);
       const normalizedSpeakers = this.normalizeGeminiTtsSpeakers(options?.speakers, transcriptSpeakers);
@@ -1412,7 +1412,6 @@ export class GoogleAdapter extends BaseAdapter {
       });
       usedVoice = voiceName;
       if (isGemini38Tts) {
-        const transcript = this.extractGeminiTtsTranscript(promptText);
         contents = [{
           role: 'user',
           parts: this.buildGemini38TtsParts(this.parseGeminiTtsTurns(transcript), [], false)
@@ -1486,7 +1485,15 @@ export class GoogleAdapter extends BaseAdapter {
       }
     }
 
-    const transcriptLines = transcriptStart < 0 ? lines : lines.slice(transcriptStart);
+    if (transcriptStart < 0) {
+      const transcript = lines.join('\n').trim();
+      if (!transcript) {
+        throw new Error('Gemini TTS transcript is empty');
+      }
+      return transcript;
+    }
+
+    const transcriptLines = lines.slice(transcriptStart);
     let firstContentLine = transcriptLines.findIndex((line) => line.trim());
     if (firstContentLine < 0) {
       throw new Error('Gemini TTS transcript is empty');
