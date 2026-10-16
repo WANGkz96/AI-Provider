@@ -134,6 +134,73 @@ test('Gemini 3.8 strips unsupported sampling parameters and maps MINIMAL to LOW'
   });
 });
 
+test('Gemini 4 Argon uses the Vertex Enterprise client and its supported thinking fields', async () => {
+  const adapter = new GoogleAdapter({
+    googleUseVertex: true,
+    googleCloudProject: 'test-project',
+    googleCloudLocation: 'us-central1'
+  });
+  let request;
+  let regularClientCalled = false;
+  adapter.enterpriseAI.models.generateContent = async (value) => {
+    request = value;
+    return {
+      candidates: [{
+        content: { role: 'model', parts: [{ text: 'ready' }] },
+        finishReason: 'STOP'
+      }],
+      usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 }
+    };
+  };
+  adapter.genAI.models.generateContent = async () => {
+    regularClientCalled = true;
+    throw new Error('Gemini 4 Vertex requests must use the Enterprise client');
+  };
+
+  await adapter.generate({
+    model: 'gemini-4-argon',
+    apiModelId: 'gemini-4-argon',
+    type: 'text',
+    prompt: 'Say ready.',
+    options: {
+      maxTokens: 32768,
+      temperature: 0.7,
+      topP: 0.95,
+      topK: 64,
+      thinking: { level: 'MINIMAL', budget: 8192 }
+    }
+  });
+
+  assert.equal(regularClientCalled, false);
+  assert.equal(request.model, 'gemini-4-argon');
+  assert.equal(request.config.maxOutputTokens, 32768);
+  assert.equal(request.config.temperature, undefined);
+  assert.equal(request.config.topP, undefined);
+  assert.equal(request.config.topK, undefined);
+  assert.deepEqual(request.config.thinkingConfig, { thinkingLevel: 'LOW' });
+});
+
+test('Gemini 4 converts legacy thinking budgets without sending thinkingBudget', () => {
+  const adapter = new GoogleAdapter({ googleApiKey: 'test-key', googleUseVertex: false });
+
+  assert.deepEqual(
+    adapter.buildGeminiThinkingConfig('gemini-4-argon', { budget: 4096 }),
+    { thinkingLevel: 'LOW' }
+  );
+  assert.deepEqual(
+    adapter.buildGeminiThinkingConfig('gemini-4-argon', { budget: 8192 }),
+    { thinkingLevel: 'MEDIUM' }
+  );
+  assert.deepEqual(
+    adapter.buildGeminiThinkingConfig('gemini-4-argon', { budget: 24576 }),
+    { thinkingLevel: 'HIGH' }
+  );
+  assert.equal(
+    adapter.buildGeminiThinkingConfig('gemini-4-argon', { budget: -1 }),
+    undefined
+  );
+});
+
 test('drops stale text thought signatures but preserves function-call signatures', async () => {
   const adapter = new GoogleAdapter({
     googleApiKey: 'test-key',

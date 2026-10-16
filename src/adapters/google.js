@@ -42,8 +42,8 @@ export class GoogleAdapter extends BaseAdapter {
       }
     });
 
-    // Gemini 3.8 TTS is served through the Gemini Enterprise API on Vertex,
-    // whose endpoint is global and whose client option is `enterprise`.
+    // Gemini 3.8 TTS and Gemini 4 Argon use the Gemini Enterprise API on
+    // Vertex, whose endpoint is global and whose client option is `enterprise`.
     this.enterpriseAI = this.useVertex
       ? new GoogleGenAI({
           enterprise: true,
@@ -114,7 +114,8 @@ export class GoogleAdapter extends BaseAdapter {
 
     const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media });
     const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
-    const supportsSamplingParameters = !this.isGemini38FlashModel(model);
+    const supportsSamplingParameters = !this.isGemini38FlashModel(model) && !this.isGemini4Model(model);
+    const client = this.getGeminiModelClient(model);
     const config = {
       temperature: supportsSamplingParameters ? options?.temperature : undefined,
       topP: supportsSamplingParameters ? options?.topP : undefined,
@@ -136,11 +137,11 @@ export class GoogleAdapter extends BaseAdapter {
     };
 
     if (stream) {
-      const responseStream = await this.imageAI.models.generateContentStream(request);
+      const responseStream = await client.models.generateContentStream(request);
       return this.transformGeminiContentStream(responseStream);
     }
 
-    const response = await this.imageAI.models.generateContent(request);
+    const response = await client.models.generateContent(request);
     return this.formatGeminiContentResponse(response, {
       responseMimeType: options?.responseMimeType
     });
@@ -441,6 +442,17 @@ export class GoogleAdapter extends BaseAdapter {
     return /^gemini-3\.8-flash([.-]|$)/.test(normalizedModel);
   }
 
+  isGemini4Model(model) {
+    const normalizedModel = this.normalizeText(model).trim().toLowerCase();
+    return /^gemini-4(?:[.-]|$)/.test(normalizedModel);
+  }
+
+  getGeminiModelClient(model) {
+    return this.useVertex && this.isGemini4Model(model)
+      ? this.enterpriseAI
+      : this.genAI;
+  }
+
   isGemma4ThinkingModel(model) {
     const normalizedModel = this.normalizeText(model).trim().toLowerCase();
     return /^gemma-4([.-]|$)/.test(normalizedModel);
@@ -521,6 +533,18 @@ export class GoogleAdapter extends BaseAdapter {
     return mappedLevel === 'MINIMAL' ? 'LOW' : mappedLevel;
   }
 
+  normalizeGemini4ThinkingLevel(level, budget) {
+    const explicitLevel = this.normalizeThinkingLevel(level);
+    if (explicitLevel === 'MINIMAL') return 'LOW';
+    if (explicitLevel) return explicitLevel;
+
+    const normalizedBudget = this.normalizeThinkingBudget(budget);
+    if (normalizedBudget === undefined || normalizedBudget === -1) return undefined;
+    if (normalizedBudget <= 4096) return 'LOW';
+    if (normalizedBudget <= 8192) return 'MEDIUM';
+    return 'HIGH';
+  }
+
   buildGeminiThinkingConfig(model, thinking) {
     if (!thinking || typeof thinking !== 'object') {
       return undefined;
@@ -533,6 +557,16 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     const includeThoughts = thinking.includeThoughts === true ? true : undefined;
+
+    if (this.isGemini4Model(model)) {
+      const thinkingLevel = this.normalizeGemini4ThinkingLevel(thinking.level, thinking.budget);
+      const config = this.removeUndefined({
+        includeThoughts,
+        thinkingLevel
+      });
+
+      return Object.keys(config).length > 0 ? config : undefined;
+    }
 
     if (this.isGemini3ThinkingModel(model)) {
       const thinkingLevel = this.isGemini38FlashModel(model)
@@ -1160,7 +1194,8 @@ export class GoogleAdapter extends BaseAdapter {
     }
 
     const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
-    const supportsSamplingParameters = !this.isGemini38FlashModel(model);
+    const supportsSamplingParameters = !this.isGemini38FlashModel(model) && !this.isGemini4Model(model);
+    const client = this.getGeminiModelClient(model);
     const config = {
       temperature: supportsSamplingParameters ? options?.temperature : undefined,
       topP: supportsSamplingParameters ? options?.topP : undefined,
@@ -1182,13 +1217,13 @@ export class GoogleAdapter extends BaseAdapter {
     };
 
     if (stream) {
-      const responseStream = await this.genAI.models.generateContentStream(request);
+      const responseStream = await client.models.generateContentStream(request);
       return this.transformGeminiContentStream(responseStream);
     }
 
     let response;
     try {
-      response = await this.genAI.models.generateContent(request);
+      response = await client.models.generateContent(request);
     } catch (error) {
       if (error?.status === 400) {
         console.error('[GoogleAdapter:GenAI] Rejected contents summary:', JSON.stringify(this.summarizeGeminiContents(contents)));

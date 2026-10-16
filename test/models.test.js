@@ -45,6 +45,18 @@ test('Gemini 3.8 Flash uses the same model ID in both Google modes', () => {
   assert.deepEqual(model.aliases, ['models/gemini-3.8-flash']);
 });
 
+test('Gemini 4 Argon uses the native model ID in both Google modes', () => {
+  const model = models.find((entry) => entry.id === 'gemini-4-argon');
+
+  assert.ok(model, 'gemini-4-argon must stay configured');
+  assert.equal(model.adapterMode, 'native');
+  assert.equal(model.type, 'text');
+  assert.equal(model.aiStudioApiModelId, 'gemini-4-argon');
+  assert.equal(model.vertexApiModelId, 'gemini-4-argon');
+  assert.deepEqual(model.availableIn, ['aiStudio', 'vertex']);
+  assert.deepEqual(model.aliases, ['models/gemini-4-argon']);
+});
+
 test('Gemini TTS models use their AI Studio Free Tier limits and IDs', () => {
   const expected = {
     'gemini-2.5-flash-tts': 'gemini-2.5-flash-preview-tts',

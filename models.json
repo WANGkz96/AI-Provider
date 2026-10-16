@@ -135,6 +135,22 @@
     }
   },
   {
+    "id": "gemini-4-argon",
+    "provider": "google",
+    "apiModelId": "gemini-4-argon",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-4-argon",
+    "vertexApiModelId": "gemini-4-argon",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-4-argon"
+    ]
+  },
+  {
     "id": "gemini-3.8-flash",
     "provider": "google",
     "apiModelId": "gemini-3.8-flash",

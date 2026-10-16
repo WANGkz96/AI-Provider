@@ -130,6 +130,16 @@ status. It requires the same access key as the other protected endpoints.
 
 Use these shapes for `thinking`:
 
+Gemini 4 Argon:
+
+```json
+{
+  "thinking": {
+    "level": "MEDIUM"
+  }
+}
+```
+
 Gemini 3 / 3.1:
 
 ```json
@@ -154,9 +164,10 @@ Gemini 2.5 and earlier:
 
 Notes:
 
-- `thinking.level` is supported by `/run` for Gemini 3 / 3.1: `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`.
-- `thinking.budget` is still accepted for Gemini 2.5 and earlier.
-- `temperature`, `topP`, and `maxTokens` / `max_tokens` / `maxOutputTokens` / `max_output_tokens` continue to work independently of `thinking`.
+- Gemini 4 Argon accepts `LOW`, `MEDIUM`, or `HIGH`; it cannot turn thinking off. `/run` maps legacy `MINIMAL` to `LOW` and numeric budgets to the nearest supported level. Direct Google API calls must not send `thinkingBudget` or `MINIMAL` for Gemini 4.
+- `thinking.level` is supported by `/run` for Gemini 3 / 3.1 / 4. Gemini 2.5 and earlier use `thinking.budget`.
+- Gemini 4's `maxTokens` / `max_tokens` / `maxOutputTokens` / `max_output_tokens` cap includes thinking tokens; Google recommends at least 32768 when setting it explicitly.
+- `temperature`, `topP`, and `topK` are omitted for Gemini 3.8 Flash and Gemini 4 Argon because those models ignore or reject sampling parameters. Other models continue to receive supported sampling settings.
 - `includeThoughts` enables provider-native thought summaries when the model returns them.
 
 #### Advanced Agent Fields
