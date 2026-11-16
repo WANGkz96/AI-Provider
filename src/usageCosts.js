@@ -18,8 +18,8 @@ const GOOGLE_PRICING = {
   },
   'gemini-4-carbon': {
     source: 'Google Agent Platform pricing, global standard (introductory until 2026-11-30)',
-    inputPer1M: Date.now() < Date.parse('2026-12-01T00:00:00Z') ? 2 : 4,
-    outputPer1M: Date.now() < Date.parse('2026-12-01T00:00:00Z') ? 10 : 20
+    inputPer1M: 2,
+    outputPer1M: 10
   },
   'gemini-nano-banana-2.1': {
     source: 'Google Agent Platform pricing, global standard',
@@ -401,7 +401,12 @@ export const estimateRunCost = (entry) => {
       || entry.model
       || entry.response?.metadata?.model
   );
-  const pricing = GOOGLE_PRICING[modelId];
+  let pricing = GOOGLE_PRICING[modelId];
+  // Carbon's introductory price ends at the start of December. Resolve this
+  // for each request so a long-running server updates without a restart.
+  if (modelId === 'gemini-4-carbon' && Date.parse(entry.timestamp || new Date().toISOString()) >= Date.parse('2026-12-01T00:00:00Z')) {
+    pricing = { ...pricing, inputPer1M: 4, outputPer1M: 20 };
+  }
   if (!pricing) {
     return {
       currency: 'USD',

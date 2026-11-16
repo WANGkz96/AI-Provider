@@ -37,3 +37,10 @@ test('image output tokens are not billed twice in the estimate', async () => {
   });
   assert.equal(cost.totalUsd, 0.03585);
 });
+
+test('Carbon price changes after the introductory period', async () => {
+  const { estimateRunCost } = await import('../src/usageCosts.js');
+  const entry = { provider: 'google', model: 'gemini-4-carbon', usage: { inputTokens: 1000000, outputTokens: 1000000 } };
+  assert.equal(estimateRunCost({ ...entry, timestamp: '2026-11-30T12:00:00Z' }).totalUsd, 12);
+  assert.equal(estimateRunCost({ ...entry, timestamp: '2026-12-01T12:00:00Z' }).totalUsd, 24);
+});
