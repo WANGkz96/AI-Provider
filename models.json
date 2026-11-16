@@ -135,6 +135,50 @@
     }
   },
   {
+    "id": "gemini-4-hydrogen",
+    "provider": "google",
+    "apiModelId": "gemini-4-hydrogen",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-4-hydrogen",
+    "vertexApiModelId": "gemini-4-hydrogen",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-4-hydrogen"
+    ],
+    "eco": {
+      "enabled": true,
+      "quotaSource": "provisional",
+      "rpm": 1,
+      "rpd": 5
+    }
+  },
+  {
+    "id": "gemini-4-carbon",
+    "provider": "google",
+    "apiModelId": "gemini-4-carbon",
+    "adapterMode": "native",
+    "type": "text",
+    "aiStudioApiModelId": "gemini-4-carbon",
+    "vertexApiModelId": "gemini-4-carbon",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-4-carbon"
+    ],
+    "eco": {
+      "enabled": false,
+      "quotaSource": "official_no_free_tier",
+      "rpm": 0,
+      "rpd": 0
+    }
+  },
+  {
     "id": "gemini-4-argon",
     "provider": "google",
     "apiModelId": "gemini-4-argon",
@@ -256,6 +300,29 @@
     "apiModelId": "gemini-3.1-pro-preview",
     "adapterMode": "openai",
     "type": "text"
+  },
+  {
+    "id": "gemini-nano-banana-2.1",
+    "provider": "google",
+    "apiModelId": "gemini-nano-banana-2.1",
+    "adapterMode": "native",
+    "type": "image",
+    "aiStudioApiModelId": "gemini-nano-banana-2.1",
+    "vertexApiModelId": "gemini-nano-banana-2.1",
+    "availableIn": [
+      "aiStudio",
+      "vertex"
+    ],
+    "aliases": [
+      "models/gemini-nano-banana-2.1"
+    ],
+    "imageMode": "nano-banana",
+    "eco": {
+      "enabled": false,
+      "quotaSource": "official_no_free_tier",
+      "rpm": 0,
+      "rpd": 0
+    }
   },
   {
     "id": "gemini-3.1-flash-lite-image",
@@ -382,6 +449,24 @@
     "provider": "groq",
     "apiModelId": "llama-3.3-70b-versatile",
     "type": "text"
+  },
+  {
+    "id": "gpt-oss-20b",
+    "provider": "groq",
+    "apiModelId": "openai/gpt-oss-20b",
+    "type": "text",
+    "aliases": [
+      "openai/gpt-oss-20b"
+    ]
+  },
+  {
+    "id": "qwen3.8-27b",
+    "provider": "groq",
+    "apiModelId": "qwen/qwen3.8-27b",
+    "type": "text",
+    "aliases": [
+      "qwen/qwen3.8-27b"
+    ]
   },
   {
     "id": "gpt-oss-120b",

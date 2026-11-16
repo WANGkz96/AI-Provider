@@ -11,6 +11,22 @@ const LEDGER_LOCK_WAIT_MS = 75;
 let ledgerWriteQueue = Promise.resolve();
 
 const GOOGLE_PRICING = {
+  'gemini-4-hydrogen': {
+    source: 'Google Agent Platform pricing, global standard',
+    inputPer1M: 1.5,
+    outputPer1M: 7.5
+  },
+  'gemini-4-carbon': {
+    source: 'Google Agent Platform pricing, global standard (introductory until 2026-11-30)',
+    inputPer1M: Date.now() < Date.parse('2026-12-01T00:00:00Z') ? 2 : 4,
+    outputPer1M: Date.now() < Date.parse('2026-12-01T00:00:00Z') ? 10 : 20
+  },
+  'gemini-nano-banana-2.1': {
+    source: 'Google Agent Platform pricing, global standard',
+    inputPer1M: 1.5,
+    outputPer1M: 7.5,
+    outputImageUsd: { default: 0.0336, '1K': 0.0336, '2K': 0.0504, '4K': 0.1134 }
+  },
   'gemini-3.1-pro-preview': {
     source: 'Google Vertex AI / Gemini API pricing, Standard tier',
     inputPer1M: 2,

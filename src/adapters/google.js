@@ -112,7 +112,7 @@ export class GoogleAdapter extends BaseAdapter {
 
     console.log(`[GoogleAdapter:GeminiMultimodal] Requesting model: ${model}`);
 
-    const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media });
+    const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, media, model });
     const thinkingConfig = this.buildGeminiThinkingConfig(model, options?.thinking);
     const supportsSamplingParameters = !this.isGemini38FlashModel(model) && !this.isGemini4Model(model);
     const client = this.getGeminiModelClient(model);
@@ -147,7 +147,7 @@ export class GoogleAdapter extends BaseAdapter {
     });
   }
 
-  async buildGeminiRequestContents({ prompt, messages, media }) {
+  async buildGeminiRequestContents({ prompt, messages, media, model }) {
     const normalizedMessages = this.normalizeMessages({ prompt, messages });
     const mediaMessageIndex = this.resolveMediaMessageIndex(normalizedMessages, media);
     const contents = [];
@@ -196,7 +196,8 @@ export class GoogleAdapter extends BaseAdapter {
         index,
         mediaMessageIndex,
         media,
-        toolNameById
+        toolNameById,
+        preserveThoughtSignatures: this.isGemini4Model(model)
       });
 
       if (content) {
@@ -271,12 +272,12 @@ export class GoogleAdapter extends BaseAdapter {
     throw new Error('Media attachments require at least one user message');
   }
 
-  async mapMessageToGeminiContent({ message, index, mediaMessageIndex, media, toolNameById }) {
+  async mapMessageToGeminiContent({ message, index, mediaMessageIndex, media, toolNameById, preserveThoughtSignatures }) {
     if (!message || typeof message !== 'object') {
       return null;
     }
 
-    const preservedParts = this.extractIncomingParts(message);
+    const preservedParts = this.extractIncomingParts(message, preserveThoughtSignatures);
 
     if (message.role === 'user') {
       if (preservedParts.length > 0 && index !== mediaMessageIndex) {
@@ -348,12 +349,14 @@ export class GoogleAdapter extends BaseAdapter {
     };
   }
 
-  extractIncomingParts(message) {
+  extractIncomingParts(message, preserveThoughtSignatures = false) {
     const parts = Array.isArray(message?.provider_state?.parts)
       ? message.provider_state.parts
       : (Array.isArray(message?.parts) ? message.parts : []);
 
-    return this.sanitizeIncomingParts(this.cloneParts(parts));
+    return preserveThoughtSignatures
+      ? this.cloneParts(parts)
+      : this.sanitizeIncomingParts(this.cloneParts(parts));
   }
 
   sanitizeIncomingParts(parts) {
@@ -559,7 +562,9 @@ export class GoogleAdapter extends BaseAdapter {
     const includeThoughts = thinking.includeThoughts === true ? true : undefined;
 
     if (this.isGemini4Model(model)) {
-      const thinkingLevel = this.normalizeGemini4ThinkingLevel(thinking.level, thinking.budget);
+      const thinkingLevel = this.normalizeText(thinking.level).trim().toUpperCase() === 'XHIGH'
+        ? (model === 'gemini-4-hydrogen' ? 'XHIGH' : 'HIGH')
+        : this.normalizeGemini4ThinkingLevel(thinking.level, thinking.budget);
       const config = this.removeUndefined({
         includeThoughts,
         thinkingLevel
@@ -1186,7 +1191,7 @@ export class GoogleAdapter extends BaseAdapter {
   async generateViaGenAI({ model, prompt, messages, stream, options }) {
     console.log(`[GoogleAdapter:GenAI] Requesting model: ${model}`);
 
-    const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages });
+    const { contents, systemInstruction } = await this.buildGeminiRequestContents({ prompt, messages, model });
     const historyValidation = this.validateFunctionResponseAdjacency(contents);
 
     if (!historyValidation.valid) {
