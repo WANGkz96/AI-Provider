@@ -31,14 +31,15 @@ const getAccessToken = async () => {
     throw new Error('Google authentication did not return an access token');
   }
 
-  return token.token;
+  return { value: token.token, quotaProject: client.quotaProjectId || undefined };
 };
 
 const googleJsonRequest = async ({ url, token, method = 'GET', body }) => {
   const response = await fetch(url, {
     method,
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${token.value}`,
+      ...(token.quotaProject ? { 'x-goog-user-project': token.quotaProject } : {}),
       Accept: 'application/json',
       ...(body ? { 'Content-Type': 'application/json' } : {})
     },

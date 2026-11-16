@@ -58,7 +58,10 @@ export class EcoQuotaMonitor {
     const auth = this.authFactory();
     const client = await auth.getClient();
     const token = await client.getAccessToken();
-    return typeof token === 'string' ? token : token?.token;
+    return {
+      value: typeof token === 'string' ? token : token?.token,
+      quotaProject: client.quotaProjectId || undefined
+    };
   }
 
   async resolveProject(accessToken) {
@@ -67,7 +70,10 @@ export class EcoQuotaMonitor {
     }
 
     const response = await this.fetchImpl(`${API_KEYS_BASE}/keys:lookupKey?keyString=${encodeURIComponent(this.config.googleAiStudioApiKey)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: {
+        Authorization: `Bearer ${accessToken.value}`,
+        ...(accessToken.quotaProject ? { 'x-goog-user-project': accessToken.quotaProject } : {})
+      }
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -93,7 +99,10 @@ export class EcoQuotaMonitor {
     url.searchParams.set('pageSize', '1000');
 
     const response = await this.fetchImpl(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: {
+        Authorization: `Bearer ${accessToken.value}`,
+        ...(accessToken.quotaProject ? { 'x-goog-user-project': accessToken.quotaProject } : {})
+      }
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
