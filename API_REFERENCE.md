@@ -100,7 +100,7 @@ provider state/chaining and `maxTokens` use the same request fields in both rout
 
 Text responses expose `metadata.provider.ecoRouting`; media responses expose
 `metadata.ecoRouting`. The metadata includes the actual route, fallback reason, attempts and a
-quota snapshot. Unknown quota profiles use Vertex until monitoring provides a usable profile.
+quota snapshot. Unknown quota profiles use Vertex until monitoring provides a usable profile. Hydrogen has a conservative provisional local limit of 1 request per minute and 5 per day until project-specific quotas are available. Carbon and Nano Banana 2.1 have no AI Studio Free Tier and use Vertex when eco is requested.
 
 `use_fallback: "auto"` keeps fallback models inside the same media group. For image requests,
 `gemini-3.1-flash-lite-image` falls back to `gemini-3.1-flash-image` and then
@@ -164,6 +164,7 @@ Gemini 2.5 and earlier:
 
 Notes:
 
+- Gemini 4 Hydrogen accepts `LOW`, `MEDIUM`, `HIGH`, and `XHIGH`; Carbon and Argon accept `LOW`, `MEDIUM`, and `HIGH`. `XHIGH` requested on Carbon or Argon maps to `HIGH`. For Gemini 4 conversations, return the full assistant `provider_state` without changes to preserve thought signatures.
 - Gemini 4 Argon accepts `LOW`, `MEDIUM`, or `HIGH`; it cannot turn thinking off. `/run` maps legacy `MINIMAL` to `LOW` and numeric budgets to the nearest supported level. Direct Google API calls must not send `thinkingBudget` or `MINIMAL` for Gemini 4.
 - `thinking.level` is supported by `/run` for Gemini 3 / 3.1 / 4. Gemini 2.5 and earlier use `thinking.budget`.
 - Gemini 4's `maxTokens` / `max_tokens` / `maxOutputTokens` / `max_output_tokens` cap includes thinking tokens; Google recommends at least 32768 when setting it explicitly.

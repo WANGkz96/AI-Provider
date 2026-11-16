@@ -17,6 +17,7 @@ export const MODEL_FALLBACK_GROUPS = Object.freeze({
     'gemini-2.5-flash-lite'
   ]),
   image: Object.freeze([
+    'gemini-nano-banana-2.1',
     'gemini-3-pro-image',
     'gemini-3.1-flash-image',
     'gemini-3.1-flash-lite-image'
@@ -37,7 +38,17 @@ export const MODEL_FALLBACK_GROUPS = Object.freeze({
   ])
 });
 
+const NEW_TEXT_AUTO_FALLBACKS = Object.freeze({
+  'gemini-4-carbon': ['gemini-4-argon', 'gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash'],
+  'gemini-4-argon': ['gemini-4-hydrogen', 'gemini-3.8-flash', 'gemini-3.7-flash'],
+  'gemini-4-hydrogen': ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash']
+});
+
 const IMAGE_AUTO_FALLBACKS = Object.freeze({
+  'gemini-nano-banana-2.1': Object.freeze([
+    'gemini-3.1-flash-image',
+    'gemini-3-pro-image'
+  ]),
   'gemini-3-pro-image': Object.freeze([
     'gemini-3.1-flash-image',
     'gemini-3.1-flash-lite-image'
@@ -71,6 +82,11 @@ export const resolveAutoFallbackModelIds = (modelId, options = {}) => {
   const order = MODEL_FALLBACK_GROUPS[groupKey] || [];
   const maxModels = normalizedOptions.maxModels ?? 2;
   const canonical = normalizeModelId(modelId);
+
+  if (groupKey === 'text' && NEW_TEXT_AUTO_FALLBACKS[canonical]) {
+    const fallbacks = NEW_TEXT_AUTO_FALLBACKS[canonical];
+    return normalizedOptions.includeAll ? [...fallbacks] : fallbacks.slice(0, maxModels);
+  }
 
   if (groupKey === 'image') {
     const imageFallbacks = IMAGE_AUTO_FALLBACKS[canonical] || [];

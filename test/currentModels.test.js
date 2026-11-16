@@ -21,3 +21,19 @@ test('Gemini 4 retains signed text in prior turns and older models retain existi
   assert.equal(newer.contents[1].parts[0].thoughtSignature, 'signed');
   assert.equal(older.contents[1].parts[0].thoughtSignature, undefined);
 });
+
+test('new models use compatible fallback groups', async () => {
+  const { resolveAutoFallbackModelIds } = await import('../src/services/modelFallback.js');
+  assert.deepEqual(resolveAutoFallbackModelIds('gemini-4-hydrogen'), ['gemini-3.8-flash', 'gemini-3.7-flash']);
+  assert.deepEqual(resolveAutoFallbackModelIds('gemini-nano-banana-2.1', { type: 'image' }), ['gemini-3.1-flash-image', 'gemini-3-pro-image']);
+});
+
+test('image output tokens are not billed twice in the estimate', async () => {
+  const { estimateRunCost } = await import('../src/usageCosts.js');
+  const cost = estimateRunCost({
+    provider: 'google', model: 'gemini-nano-banana-2.1', type: 'image',
+    usage: { inputTokens: 1000, outputTokens: 1220, raw: { candidatesTokensDetails: [{ modality: 'IMAGE', tokenCount: 1120 }, { modality: 'TEXT', tokenCount: 100 }] } },
+    response: { images: [{}] }
+  });
+  assert.equal(cost.totalUsd, 0.03585);
+});

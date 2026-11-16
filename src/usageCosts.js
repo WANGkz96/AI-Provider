@@ -319,7 +319,12 @@ const estimateTokenCost = ({ pricing, usage, requestType }) => {
   const inputRate = rateForTokens(pricing, inputTokens, inputKind);
   const outputRate = outputRateForTokens(pricing, inputTokens, outputKind);
   const inputUsd = Number.isFinite(inputRate) ? (inputTokens * inputRate / TOKENS_PER_MILLION) : 0;
-  const outputUsd = Number.isFinite(outputRate) ? (outputTokens * outputRate / TOKENS_PER_MILLION) : 0;
+  // Image output tokens are priced separately by image count and resolution.
+  const imageOutputTokens = requestType === 'image' && Array.isArray(usage.raw?.candidatesTokensDetails)
+    ? usage.raw.candidatesTokensDetails.filter(item => item.modality === 'IMAGE').reduce((sum, item) => sum + Number(item.tokenCount || 0), 0)
+    : 0;
+  const textOutputTokens = Math.max(0, outputTokens - imageOutputTokens);
+  const outputUsd = Number.isFinite(outputRate) ? (textOutputTokens * outputRate / TOKENS_PER_MILLION) : 0;
 
   return {
     inputUsd,
