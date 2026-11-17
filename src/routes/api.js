@@ -245,6 +245,10 @@ function isModelAvailableForRequest(model, ecoRequested) {
 }
 
 // --- Validation Schemas ---
+const thinkingLevelSchema = z.preprocess(
+  value => typeof value === 'string' ? value.trim().toUpperCase() : value,
+  z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH'])
+);
 const runSchema = z.object({
   model: z.string(),
   // Messages are required for Chat, but strictly speaking TTS might just need a prompt
@@ -280,18 +284,18 @@ const runSchema = z.object({
   max_output_tokens: z.number().optional(),
   thinking: z.object({
     budget: z.number().int().min(-1).optional(),
-    level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH']).optional(),
+    level: thinkingLevelSchema.optional(),
     thinkingBudget: z.number().int().min(-1).optional(),
     thinking_budget: z.number().int().min(-1).optional(),
-    thinkingLevel: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH']).optional(),
-    thinking_level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH']).optional(),
+    thinkingLevel: thinkingLevelSchema.optional(),
+    thinking_level: thinkingLevelSchema.optional(),
     includeThoughts: z.boolean().optional(),
     include_thoughts: z.boolean().optional()
   }).optional(),
   thinkingBudget: z.number().int().min(-1).optional(),
   thinking_budget: z.number().int().min(-1).optional(),
-  thinkingLevel: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH']).optional(),
-  thinking_level: z.enum(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH', 'XHIGH']).optional(),
+  thinkingLevel: thinkingLevelSchema.optional(),
+  thinking_level: thinkingLevelSchema.optional(),
   includeThoughts: z.boolean().optional(),
   include_thoughts: z.boolean().optional(),
   responseMimeType: z.enum(['text/plain', 'application/json']).optional(),
@@ -717,6 +721,15 @@ router.get('/available-models', requireAccessKey, async (req, res) => {
         }
 
         // Additions (e.g. Voices / Image modes)
+        if (m.provider === 'google' && (m.type || 'text') === 'text' && /^gemini-4(?:[.-]|$)/i.test(m.id)) {
+            const hydrogen = /^gemini-4-hydrogen(?:[.-]|$)/i.test(m.id);
+            additions.thinking = {
+                supported: true,
+                levels: hydrogen ? ['LOW', 'MEDIUM', 'HIGH', 'XHIGH'] : ['LOW', 'MEDIUM', 'HIGH'],
+                defaultLevel: hydrogen ? 'HIGH' : 'MEDIUM',
+                canDisable: false
+            };
+        }
         if (m.type === 'audio' && available) {
             if (m.audioMode) {
                 additions.audioMode = m.audioMode;

@@ -897,6 +897,7 @@ const AUDIO_LANGUAGES = ['en', 'ru', 'es', 'fr', 'de', 'ja', 'zh'];
 const GEMINI_TTS_MODES = ['single', 'multi'];
 const THINKING_LEVELS = ['MINIMAL', 'LOW', 'MEDIUM', 'HIGH'];
 const GEMINI38_THINKING_LEVELS = ['LOW', 'MEDIUM', 'HIGH'];
+const GEMINI4_HYDROGEN_THINKING_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'XHIGH'];
 const GEMMA4_THINKING_LEVELS = ['MINIMAL', 'HIGH'];
 const MAX_MEDIA_ATTACHMENTS = 10;
 const TEXT_MEDIA_ACCEPTED_PREFIXES = ['image/', 'video/', 'audio/'];
@@ -987,7 +988,7 @@ const supportsThinkingLevel = computed(() => {
     }
 
     const modelId = String(currentModel.value?.apiModelId || currentModel.value?.id || '').toLowerCase();
-    return /^gemini-3([.-]|$)/.test(modelId) || /^gemma-4([.-]|$)/.test(modelId);
+    return /^gemini-[34]([.-]|$)/.test(modelId) || /^gemma-4([.-]|$)/.test(modelId);
 });
 
 const isGemma4Model = (model) => {
@@ -1000,14 +1001,21 @@ const isGemini38FlashModel = (model) => {
     return /^gemini-3\.8-flash([.-]|$)/.test(modelId);
 };
 
+const isGemini4Model = (model) => /^gemini-4([.-]|$)/.test(String(model?.apiModelId || model?.id || '').toLowerCase());
+const isGemini4Hydrogen = (model) => /^gemini-4-hydrogen([.-]|$)/.test(String(model?.apiModelId || model?.id || '').toLowerCase());
+
 const getThinkingLevelsForModel = (model) => (
-    isGemini38FlashModel(model)
+    isGemini4Hydrogen(model)
+        ? GEMINI4_HYDROGEN_THINKING_LEVELS
+        : isGemini4Model(model) || isGemini38FlashModel(model)
         ? GEMINI38_THINKING_LEVELS
         : (isGemma4Model(model) ? GEMMA4_THINKING_LEVELS : THINKING_LEVELS)
 );
 
 const getDefaultThinkingLevelForModel = (model) => (
-    isGemini38FlashModel(model)
+    isGemini4Hydrogen(model)
+        ? 'HIGH'
+        : isGemini4Model(model) || isGemini38FlashModel(model)
         ? 'MEDIUM'
         : (isGemma4Model(model) ? 'HIGH' : DEFAULT_TEXT_PARAMS.thinkingLevel)
 );

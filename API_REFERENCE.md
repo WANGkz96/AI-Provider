@@ -52,7 +52,7 @@
   ```
 
 Model aliases are accepted by `/run` but `/available-models` returns the canonical
-model id for the active Google mode. For example, `gemini-3.1-flash-lite-preview`
+model id for the active Google mode. Gemini 4 models expose `additions.thinking` with supported levels, default level and whether thinking can be disabled. For example, `gemini-3.1-flash-lite-preview`
 and `models/gemini-3.1-flash-lite-preview` resolve to `gemini-3.1-flash-lite`;
 `gemma-4` resolves to the configured Gemma 4 26B model for the current mode.
 
