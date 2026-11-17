@@ -27,7 +27,7 @@
       <template v-if="usage">
         <section class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="rounded-lg border border-emerald-800/60 bg-emerald-950/20 p-4">
-            <div class="text-xs uppercase tracking-wide text-emerald-300/70">Actual Vertex AI spend</div>
+            <div class="text-xs uppercase tracking-wide text-emerald-300/70">Estimated Vertex AI spend</div>
             <div class="mt-2 text-2xl font-semibold text-emerald-100">{{ money(usage.summary?.actualVertexUsd) }}</div>
             <div class="mt-1 text-xs text-emerald-300/60">{{ usage.summary?.vertexRequestCount || 0 }} Vertex requests</div>
           </div>
@@ -42,7 +42,7 @@
           <div class="rounded-lg border border-blue-800/60 bg-blue-950/20 p-4">
             <div class="text-xs uppercase tracking-wide text-blue-300/70">Estimated month</div>
             <div class="mt-2 text-2xl font-semibold text-blue-100">{{ money(usage.summary?.totalUsd) }}</div>
-            <div class="mt-1 text-xs text-blue-300/60">Persistent ledger + audit journal, not request logs</div>
+            <div class="mt-1 text-xs text-blue-300/60">Estimated from recorded usage and public rates</div>
           </div>
           <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
             <div class="text-xs uppercase tracking-wide text-slate-500">Priced requests</div>

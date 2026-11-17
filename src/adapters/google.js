@@ -733,6 +733,7 @@ export class GoogleAdapter extends BaseAdapter {
     const extractChunkText = this.extractGeminiText.bind(this);
     const extractThoughtText = this.extractGeminiThoughtText.bind(this);
     const cloneParts = this.cloneParts.bind(this);
+    const mapNativeUsage = this.mapNativeUsage.bind(this);
 
     const transformStream = async function* () {
       for await (const chunk of streamResponse) {
@@ -740,14 +741,7 @@ export class GoogleAdapter extends BaseAdapter {
         const parts = cloneParts(candidateContent?.parts);
         const content = extractChunkText(chunk);
         const thought = extractThoughtText(chunk);
-        const usage = chunk?.usageMetadata
-          ? {
-              inputTokens: chunk.usageMetadata.promptTokenCount ?? null,
-              outputTokens: chunk.usageMetadata.candidatesTokenCount ?? null,
-              totalTokens: chunk.usageMetadata.totalTokenCount ?? null,
-              raw: chunk.usageMetadata
-            }
-          : null;
+        const usage = chunk?.usageMetadata ? mapNativeUsage(chunk.usageMetadata) : null;
         const finishReason = chunk?.candidates?.[0]?.finishReason ?? null;
 
         if (content || thought || parts.length > 0 || usage || finishReason) {

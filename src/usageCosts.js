@@ -11,20 +11,28 @@ const LEDGER_LOCK_WAIT_MS = 75;
 let ledgerWriteQueue = Promise.resolve();
 
 const GOOGLE_PRICING = {
+  'gemini-4-argon': {
+    source: 'Google Agent Platform global standard pricing; promotional credits may be applied separately',
+    inputPer1M: 2, cachedInputPer1M: 0.1, outputPer1M: 10
+  },
   'gemini-4-hydrogen': {
     source: 'Google Agent Platform pricing, global standard',
     inputPer1M: 1.5,
+    cachedInputPer1M: 0.075,
     outputPer1M: 7.5
   },
   'gemini-4-carbon': {
     source: 'Google Agent Platform pricing, global standard (introductory until 2026-11-30)',
     inputPer1M: 2,
+    cachedInputPer1M: 0.1,
     outputPer1M: 10
   },
   'gemini-nano-banana-2.1': {
     source: 'Google Agent Platform pricing, global standard',
     inputPer1M: 1.5,
     outputPer1M: 7.5,
+    cachedInputPer1M: 0.15,
+    outputImagePer1M: 30,
     outputImageUsd: { default: 0.0336, '1K': 0.0336, '2K': 0.0504, '4K': 0.1134 }
   },
   'gemini-3.1-pro-preview': {
@@ -82,6 +90,7 @@ const GOOGLE_PRICING = {
   'gemini-3.8-flash': {
     source: 'Google Gemini 3.8 Flash introductory pricing through 2026-12-31',
     inputPer1M: 0.75,
+    cachedInputPer1M: 0.075,
     inputLongPer1M: 0.75,
     outputPer1M: 3.75,
     outputLongPer1M: 3.75,
@@ -90,17 +99,19 @@ const GOOGLE_PRICING = {
   'gemini-3.7-flash': {
     source: 'Google Gemini 3.7 Flash introductory pricing through 2026-12-31',
     inputPer1M: 0.75,
+    cachedInputPer1M: 0.075,
     inputLongPer1M: 0.75,
     outputPer1M: 3.75,
     outputLongPer1M: 3.75,
     longContextThreshold: 200_000
   },
   'gemini-3.6-flash': {
-    source: 'Google Vertex AI / Gemini API pricing, Standard tier',
-    inputPer1M: 1.5,
-    inputLongPer1M: 1.5,
-    outputPer1M: 7.5,
-    outputLongPer1M: 7.5,
+    source: 'Google Agent Platform pricing, introductory through 2026-12-31',
+    inputPer1M: 0.75,
+    cachedInputPer1M: 0.075,
+    inputLongPer1M: 0.75,
+    outputPer1M: 3.75,
+    outputLongPer1M: 3.75,
     longContextThreshold: 200_000
   },
   'gemini-3.5-flash-lite': {
@@ -130,6 +141,7 @@ const GOOGLE_PRICING = {
     outputPer1M: 0.4
   },
   'gemini-3.1-flash-lite-image': {
+    outputImagePer1M: 30,
     source: 'Google Agent Platform pricing, Standard tier',
     inputPer1M: 0.25,
     outputPer1M: 1.5,
@@ -139,6 +151,7 @@ const GOOGLE_PRICING = {
     }
   },
   'gemini-3.1-flash-image': {
+    outputImagePer1M: 60,
     source: 'Google Agent Platform pricing, Standard tier',
     inputPer1M: 0.5,
     outputPer1M: 3,
@@ -152,6 +165,7 @@ const GOOGLE_PRICING = {
     }
   },
   'gemini-3-pro-image': {
+    outputImagePer1M: 120,
     source: 'Google Agent Platform pricing, Standard tier',
     inputPer1M: 2,
     outputPer1M: 12,
@@ -161,6 +175,14 @@ const GOOGLE_PRICING = {
       '2K': 0.134,
       '4K': 0.24
     }
+  },
+  'gemini-3.8-flash-tts': {
+    source: 'Google Agent Platform TTS global standard; introductory through 2026-12-31',
+    inputPer1M: 0.5, outputAudioPer1M: 9, audioTokensPerSecond: 25
+  },
+  'gemini-3.8-flash-lite-tts': {
+    source: 'Google Agent Platform TTS global standard; introductory through 2026-12-31',
+    inputPer1M: 0.5, outputAudioPer1M: 6, audioTokensPerSecond: 25
   },
   'gemini-2.5-flash-tts': {
     source: 'Google Cloud TTS / Vertex AI pricing, Standard tier',
@@ -302,39 +324,31 @@ const resolveUnitPrice = (priceMap, key) => {
 };
 
 const estimateTokenCost = ({ pricing, usage, requestType }) => {
-  if (!usage) {
-    return {
-      inputUsd: 0,
-      outputUsd: 0,
-      inputTokens: null,
-      outputTokens: null,
-      notes: ['No token usage was returned by provider']
-    };
+  if (!usage) return { inputUsd: 0, outputUsd: 0, imageUsd: null, inputTokens: null, outputTokens: null, notes: ['No token usage was returned by provider'] };
+  const raw = usage.raw || {};
+  const inputTokens = Number(usage.inputTokens ?? raw.promptTokenCount ?? 0);
+  const candidates = Number(raw.candidatesTokenCount ?? 0);
+  const thoughts = Number(raw.thoughtsTokenCount ?? 0);
+  const outputTokens = Math.max(Number(usage.outputTokens || 0), candidates + thoughts);
+  const inputRate = rateForTokens(pricing, inputTokens, requestType === 'audio' ? 'audio' : 'text');
+  const outputRate = outputRateForTokens(pricing, inputTokens, requestType === 'audio' ? 'audio' : 'text');
+  const cachedTokens = Math.min(inputTokens, Math.max(0, Number(raw.cachedContentTokenCount || 0)));
+  const notes = [];
+  const cachedRate = pricing.cachedInputPer1M;
+  const inputUsd = Number.isFinite(inputRate) ? ((inputTokens - cachedTokens) * inputRate + cachedTokens * (cachedRate ?? inputRate)) / TOKENS_PER_MILLION : 0;
+  if (cachedTokens && !Number.isFinite(cachedRate)) notes.push('Cached input rate unavailable; estimated at the standard input rate');
+  const details = Array.isArray(raw.candidatesTokensDetails) ? raw.candidatesTokensDetails : null;
+  const imageTokens = details?.filter(item => item.modality === 'IMAGE').reduce((sum, item) => sum + Number(item.tokenCount || 0), 0) || 0;
+  const audioTokens = details?.filter(item => item.modality === 'AUDIO').reduce((sum, item) => sum + Number(item.tokenCount || 0), 0) || 0;
+  const imageUsd = requestType === 'image' && Number.isFinite(pricing.outputImagePer1M) && imageTokens > 0
+    ? imageTokens * pricing.outputImagePer1M / TOKENS_PER_MILLION : null;
+  let billableOutputTokens = outputTokens - imageTokens;
+  if (requestType === 'audio' && audioTokens > 0) {
+    billableOutputTokens = audioTokens;
+    if (candidates > audioTokens || thoughts > 0) notes.push('Non-audio output tokens have no published TTS output rate and are excluded');
   }
-
-  const inputTokens = Number(usage.inputTokens || 0);
-  const outputTokens = Number(usage.outputTokens || 0);
-  const inputKind = requestType === 'audio' ? 'audio' : 'text';
-  const outputKind = requestType === 'audio' ? 'audio' : 'text';
-  const inputRate = rateForTokens(pricing, inputTokens, inputKind);
-  const outputRate = outputRateForTokens(pricing, inputTokens, outputKind);
-  const inputUsd = Number.isFinite(inputRate) ? (inputTokens * inputRate / TOKENS_PER_MILLION) : 0;
-  // Image output tokens are priced separately by image count and resolution.
-  const imageOutputTokens = requestType === 'image' && Array.isArray(usage.raw?.candidatesTokensDetails)
-    ? usage.raw.candidatesTokensDetails.filter(item => item.modality === 'IMAGE').reduce((sum, item) => sum + Number(item.tokenCount || 0), 0)
-    : 0;
-  const textOutputTokens = Math.max(0, outputTokens - imageOutputTokens);
-  const outputUsd = Number.isFinite(outputRate) ? (textOutputTokens * outputRate / TOKENS_PER_MILLION) : 0;
-
-  return {
-    inputUsd,
-    outputUsd,
-    inputTokens,
-    outputTokens,
-    inputRatePer1M: inputRate ?? null,
-    outputRatePer1M: outputRate ?? null,
-    notes: []
-  };
+  const outputUsd = Number.isFinite(outputRate) ? Math.max(0, billableOutputTokens) * outputRate / TOKENS_PER_MILLION : 0;
+  return { inputUsd, outputUsd, imageUsd, inputTokens, outputTokens, cachedTokens, imageTokens, inputRatePer1M: inputRate ?? null, outputRatePer1M: outputRate ?? null, notes };
 };
 
 export const estimateRunCost = (entry) => {
@@ -404,8 +418,15 @@ export const estimateRunCost = (entry) => {
   let pricing = GOOGLE_PRICING[modelId];
   // Carbon's introductory price ends at the start of December. Resolve this
   // for each request so a long-running server updates without a restart.
-  if (modelId === 'gemini-4-carbon' && Date.parse(entry.timestamp || new Date().toISOString()) >= Date.parse('2026-12-01T00:00:00Z')) {
-    pricing = { ...pricing, inputPer1M: 4, outputPer1M: 20 };
+  const timestamp = Date.parse(entry.timestamp || new Date().toISOString());
+  if (['gemini-4-carbon', 'gemini-4-argon'].includes(modelId) && timestamp >= Date.parse('2026-12-01T00:00:00Z')) {
+    pricing = { ...pricing, inputPer1M: 4, cachedInputPer1M: 0.2, outputPer1M: 20 };
+  }
+  if (['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'].includes(modelId) && timestamp >= Date.parse('2027-01-01T00:00:00Z')) {
+    pricing = { ...pricing, inputPer1M: 1.5, inputLongPer1M: 1.5, cachedInputPer1M: 0.15, outputPer1M: 7.5, outputLongPer1M: 7.5 };
+  }
+  if (['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'].includes(modelId) && timestamp >= Date.parse('2027-01-01T00:00:00Z')) {
+    pricing = { ...pricing, inputPer1M: 1, outputAudioPer1M: modelId === 'gemini-3.8-flash-tts' ? 18 : 12 };
   }
   if (!pricing) {
     return {
@@ -423,7 +444,7 @@ export const estimateRunCost = (entry) => {
   const imageCount = countResponseItems(entry.response, 'images');
   const imageSize = resolveImageSize(entry);
   const imageUnitUsd = resolveUnitPrice(pricing.outputImageUsd, imageSize);
-  const imageUsd = imageCount * imageUnitUsd;
+  const imageUsd = tokenCost.imageUsd ?? (imageCount * imageUnitUsd);
   const videoCount = countResponseItems(entry.response, 'videos');
   const durationSeconds = Number(entry.response?.metadata?.durationSeconds || entry.request?.body?.video?.durationSeconds || 0);
   const resolution = entry.response?.metadata?.resolution || entry.request?.body?.video?.resolution || 'default';
@@ -454,7 +475,8 @@ export const estimateRunCost = (entry) => {
     imageUsd: money(imageUsd),
     videoUsd: money(videoUsd),
     generationUsd: money(generationUsd),
-    priced: totalUsd > 0 || tokenCost.inputTokens === 0 || imageCount > 0 || videoCount > 0 || generationCount > 0,
+    priced: (totalUsd > 0 || tokenCost.inputTokens === 0 || imageCount > 0 || videoCount > 0 || generationCount > 0)
+      && !notes.some(note => note.includes('no published TTS output rate') || note.includes('Cached input rate unavailable')),
     modelPricingId: modelId,
     source: pricing.source,
     rates: {
@@ -466,6 +488,8 @@ export const estimateRunCost = (entry) => {
     },
     units: {
       inputTokens: tokenCost.inputTokens,
+      cachedInputTokens: tokenCost.cachedTokens,
+      imageOutputTokens: tokenCost.imageTokens,
       outputTokens: tokenCost.outputTokens,
       audioFallbackTokens,
       generations: generationCount,
@@ -763,14 +787,14 @@ const applyUsageEntryToSummary = (summary, entry, dateKey) => {
     summary.ecoFreeRequestCount += 1;
   }
   addToBucket(summary.byProvider, entry.provider, costUsd);
-  addToBucket(summary.byModel, entry.model, costUsd);
+  addToBucket(summary.byModel, entry.cost.modelPricingId || entry.model, costUsd);
   addToBucket(summary.byType, entry.type, costUsd);
   addToBucket(summary.byDay, dateKey, costUsd);
   summary.topRequests ||= [];
   summary.topRequests.push({
     id: entry.id,
     timestamp: entry.timestamp,
-    model: entry.model,
+    model: entry.cost.modelPricingId || entry.model,
     provider: entry.provider,
     type: entry.type,
     totalUsd: costUsd,
@@ -866,7 +890,7 @@ const buildCostJournalEvent = ({ entry, monthKey, dateKey, cycle }) => ({
   durationMs: entry.durationMs ?? null,
   usage: entry.usage || entry.response?.usage || null,
   cost: entry.cost,
-  costSchemaVersion: 'google-public-pricing-2026-06-10'
+  costSchemaVersion: 'google-public-pricing-2026-11-17'
 });
 
 export const recordUsageCost = async (entry) => {
@@ -969,7 +993,67 @@ export const getUsageCostSummary = async ({ month, period } = {}) => {
     cycles: Object.keys(ledger.cycles || {}).sort().reverse(),
     journal: ledger.journal || null,
     summary,
-    pricingVersion: 'google-public-pricing-2026-07-25',
+    pricingVersion: 'google-public-pricing-2026-11-17',
     pricingModels: Object.keys(GOOGLE_PRICING).sort()
   };
+};
+
+// Rebuild offline while the provider is stopped. The caller must back up all
+// three files first; request logs can be a bounded subset of the cost journal.
+export const rebuildUsageCostsFromJournal = async ({ apply = false } = {}) => {
+  const journalText = await fs.readFile(getJournalPath(), 'utf8');
+  const events = journalText.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
+  const logs = JSON.parse(await fs.readFile(config.requestLogPath, 'utf8'));
+  if (!Array.isArray(logs) || !events.length) throw new Error('Missing journal events or invalid request log');
+  const byId = new Map(logs.map(log => [log.id, log]));
+  const oldLedger = await readLedger();
+  const zone = oldLedger.timezone || config.usageCostTimezone || 'UTC';
+  const ledger = { ...oldLedger, months: {}, cycles: {} };
+  const seen = new Set();
+  let unmatched = 0;
+  const rebuiltEvents = events.map(event => {
+    if (!event.id || seen.has(event.id)) throw new Error('Missing or duplicate event id in cost journal');
+    seen.add(event.id);
+    const log = byId.get(event.id);
+    if (!log) unmatched++;
+    // Journal retains authoritative token detail when the bounded request log was truncated.
+    const entry = { ...event, ...(log || {}), usage: event.usage || log?.usage,
+      executionProvider: event.executionProvider, eco: event.ecoRequested };
+    if (!log && event.executionProvider === 'aiStudio' && event.ecoRequested) {
+      entry.providerMetadata = { ecoRouting: { requested: true, route: 'aiStudio', fallback: false } };
+    }
+    if (!log && event.cost?.modelPricingId) entry.apiModelId = event.cost.modelPricingId;
+    const cost = estimateRunCost(entry);
+    if (!cost) throw new Error(`No cost estimator for journal event ${event.id}`);
+    entry.cost = cost;
+    if (log) log.cost = cost;
+    const { dateKey, monthKey } = formatDateParts(new Date(event.timestamp), zone);
+    const cycle = resolveReportCycle(dateKey);
+    const month = ledger.months[monthKey] || emptyMonth(monthKey);
+    const period = ledger.cycles[cycle.key] || emptyCycle(cycle);
+    applyUsageEntryToSummary(month, entry, dateKey);
+    applyUsageEntryToSummary(period, entry, dateKey);
+    ledger.months[monthKey] = month;
+    ledger.cycles[cycle.key] = period;
+    return { ...event, cost, recalculatedAt: new Date().toISOString(), costSchemaVersion: 'google-public-pricing-2026-11-17' };
+  });
+  trimLedgerMonths(ledger.months);
+  trimLedgerMonths(ledger.cycles);
+  ledger.updatedAt = new Date().toISOString();
+  ledger.journal = { ...(oldLedger.journal || {}), path: getJournalPath(), schemaVersion: 1,
+    recordCount: events.length, lastEventId: events.at(-1).id, updatedAt: ledger.updatedAt };
+  if (apply) {
+    // All outputs are fully serialized before the first replacement.
+    const files = [
+      [getJournalPath(), rebuiltEvents.map(event => JSON.stringify(event)).join('\n') + '\n'],
+      [config.requestLogPath, JSON.stringify(logs, null, 2)],
+      [getLedgerPath(), JSON.stringify(ledger, null, 2)]
+    ];
+    for (const [file, data] of files) await fs.writeFile(`${file}.rebuild.tmp`, data, 'utf8');
+    for (const [file] of files) await fs.rename(`${file}.rebuild.tmp`, file);
+  }
+  return { applied: apply, journalCount: events.length, requestLogCount: logs.length, unmatched,
+    summaries: Object.values(ledger.cycles).map(c => ({ period: c.periodKey, requests: c.requestCount,
+      priced: c.pricedRequestCount, unpriced: c.unpricedRequestCount, totalUsd: c.totalUsd,
+      vertexUsd: c.actualVertexUsd, ecoFree: c.ecoFreeRequestCount, byModel: c.byModel })) };
 };
