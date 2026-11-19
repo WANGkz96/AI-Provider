@@ -1270,14 +1270,22 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
         });
       } catch (streamError) {
         console.error('Streaming error:', streamError);
-        res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
-        res.end();
+        const normalizedError = normalizeUpstreamError(streamError);
+        const errorBody = normalizedError?.body || { error: streamError.message };
+        const statusCode = normalizedError?.statusCode || 500;
         await writeRunLog({
           ok: false,
-          statusCode: 500,
+          statusCode,
           stream: true,
-          error: streamError.message
+          error: errorBody.error,
+          details: normalizedError?.body
         });
+        if (!res.headersSent && normalizedError) {
+          if (normalizedError.retryAfterSeconds) res.setHeader('Retry-After', String(normalizedError.retryAfterSeconds));
+          return res.status(statusCode).type('application/json').json(errorBody);
+        }
+        res.write(`data: ${JSON.stringify(errorBody)}\n\n`);
+        res.end();
       }
     } else {
       // Standard Response (Text or Audio)
@@ -1501,7 +1509,7 @@ router.post('/run', requireAccessKey, runRateLimiter, runConcurrencyLimiter, asy
     console.error('Generation Error:', error);
     const upstreamError = normalizeUpstreamError(error);
     if (upstreamError) {
-      res.setHeader('Retry-After', String(upstreamError.retryAfterSeconds));
+      if (upstreamError.retryAfterSeconds) res.setHeader('Retry-After', String(upstreamError.retryAfterSeconds));
       await writeRunLog({
         ok: false,
         statusCode: upstreamError.statusCode,

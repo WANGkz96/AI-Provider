@@ -8,6 +8,25 @@ const getErrorStatus = (error) => Number(
   ?? 0
 );
 
+// The Google SDK can wrap an API error in one or more JSON message strings.
+const unwrapApiError = (error) => {
+  let payload = error;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (payload?.error && typeof payload.error === 'object') {
+      payload = payload.error;
+      continue;
+    }
+    const message = typeof payload === 'string' ? payload : payload?.message;
+    if (typeof message !== 'string' || !message.trim().startsWith('{')) break;
+    try {
+      payload = JSON.parse(message);
+    } catch {
+      break;
+    }
+  }
+  return payload;
+};
+
 const getHeaderValue = (headers, name) => {
   if (!headers) return null;
   if (typeof headers.get === 'function') return headers.get(name);
@@ -34,9 +53,24 @@ const getRetryAfterSeconds = (error) => {
 };
 
 export const normalizeUpstreamError = (error) => {
-  const status = getErrorStatus(error);
-  const message = String(error?.message || error || '');
-  const code = String(error?.code || '');
+  const payload = unwrapApiError(error);
+  const status = getErrorStatus(error) || getErrorStatus(payload) || Number(payload?.code) || 0;
+  const message = String(payload?.message || error?.message || error || '');
+  const code = String(payload?.status || payload?.code || error?.code || '');
+  if (status === 403 || code === 'PERMISSION_DENIED') {
+    return {
+      statusCode: 403,
+      body: {
+        error: message,
+        code: 'PERMISSION_DENIED',
+        status: 'PERMISSION_DENIED',
+        upstreamStatus: 403,
+        ...(/eligible paid billing account/i.test(message)
+          ? { reason: 'BILLING_ACCOUNT_ELIGIBILITY' }
+          : {})
+      }
+    };
+  }
   const isQuotaError = (
     status === 429
     || /RESOURCE_EXHAUSTED|rate_limit_exceeded|quota_exceeded/i.test(`${code} ${message}`)

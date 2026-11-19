@@ -57,6 +57,14 @@ and `models/gemini-3.1-flash-lite-preview` resolve to `gemini-3.1-flash-lite`;
 `gemma-4` resolves to the configured Gemma 4 26B model for the current mode.
 
 ### 3. Run Inference
+
+Upstream permission failures return HTTP `403` with `code: "PERMISSION_DENIED"`.
+If Google explicitly reports billing account eligibility, the response also contains
+`reason: "BILLING_ACCOUNT_ELIGIBILITY"`. This requires checking the Google billing
+account and supported-region requirements; changing Thinking fields does not resolve it.
+For streaming, errors before the first SSE event use the same HTTP response. Errors
+after streaming starts are sent as an SSE error payload with the same fields.
+
 Основной метод запуска генерации. Поддерживает стриминг (SSE) и обычный JSON ответ.
 
 - **POST** `/run`
